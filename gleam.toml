@@ -1,0 +1,15 @@
+name = "glimit"
+version = "1.0.0"
+
+description = "A framework-agnostic rate limiter for Gleam."
+licences = ["MIT"]
+repository = { type = "github", user = "nootr", repo = "glimit" }
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.34.0 and < 2.0.0"
+gleam_erlang = ">= 0.25.0 and < 1.0.0"
+gleam_otp = ">= 0.11.2 and < 1.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
