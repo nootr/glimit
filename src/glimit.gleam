@@ -1,4 +1,38 @@
-//// A framework-agnostic rate limiter.
+//// A framework-agnostic rate limiter for Gleam. 💫
+////
+//// This module provides a rate limiter that can be used to limit the number of
+//// requests that can be made to a given function or handler within a given
+//// time frame.
+////
+//// The rate limiter is implemented as an actor that keeps track of the number
+//// of hits for a given identifier within the last second, minute, and hour.
+//// When a hit is received, the actor checks the rate limits and either allows
+//// the hit to pass or rejects it.
+////
+//// The rate limiter can be configured with rate limits per second, minute, and
+//// hour, and a handler function that is called when the rate limit is reached.
+//// The rate limiter can be applied to a function or handler using the `apply`
+//// function, which returns a new function that checks the rate limit before
+//// calling the original function.
+////
+//// # Example
+////
+//// ```gleam
+//// import glimit
+////
+//// let limiter =
+////   glimit.new()
+////   |> glimit.per_second(10)
+////   |> glimit.per_minute(100)
+////   |> glimit.per_hour(1000)
+////   |> glimit.identifier(fn(request) { request.ip })
+////   |> glimit.handler(fn(_request) { "Rate limit reached" })
+////   |> glimit.build()
+////
+//// let handler =
+////   fn(_request) { "Hello, world!" }
+////   |> glimit.apply(limiter)
+//// ```
 ////
 
 import gleam/dict
@@ -11,18 +45,22 @@ import glimit/utils
 
 /// The messages that the actor can receive.
 ///
-pub type Message(a) {
+pub type Message(id) {
   /// Stop the actor.
   Shutdown
 
   /// Mark a hit for a given identifier.
-  Hit(input: a, reply_with: Subject(Result(Nil, Nil)))
+  Hit(identifier: id, reply_with: Subject(Result(Nil, Nil)))
 }
 
 /// The rate limiter's public interface.
 ///
-pub type RateLimiter(a, b) {
-  RateLimiter(subject: Subject(Message(a)), handler: fn(a) -> b)
+pub type RateLimiter(a, b, id) {
+  RateLimiter(
+    subject: Subject(Message(id)),
+    handler: fn(a) -> b,
+    identifier: fn(a) -> id,
+  )
 }
 
 /// A rate limiter.
@@ -32,35 +70,29 @@ pub type RateLimiterBuilder(a, b, id) {
     per_second: Option(Int),
     per_minute: Option(Int),
     per_hour: Option(Int),
-    identifier: fn(a) -> id,
-    handler: fn(a) -> b,
+    identifier: Option(fn(a) -> id),
+    handler: Option(fn(a) -> b),
   )
 }
 
-/// The actor state of the actor.
+/// The actor state.
 ///
-/// The state is a dictionary where the key is the identifier and the value is a list of epoch timestamps.
-///
-pub type State(a, b, id) {
+type State(a, b, id) {
   RateLimiterState(
     hit_log: dict.Dict(id, List(Int)),
     per_second: Option(Int),
     per_minute: Option(Int),
     per_hour: Option(Int),
-    identifier: fn(a) -> id,
-    handler: fn(a) -> b,
   )
 }
 
 fn handle_message(
-  message: Message(a),
+  message: Message(id),
   state: State(a, b, id),
-) -> actor.Next(Message(a), State(a, b, id)) {
+) -> actor.Next(Message(id), State(a, b, id)) {
   case message {
     Shutdown -> actor.Stop(process.Normal)
-    Hit(input, client) -> {
-      let identifier = state.identifier(input)
-
+    Hit(identifier, client) -> {
       // Update hit log
       let timestamp = utils.now()
       let hits =
@@ -115,15 +147,13 @@ fn handle_message(
 
 /// Create a new rate limiter builder.
 ///
-/// Panics when the rate limit hit counter cannot be created.
-///
 pub fn new() -> RateLimiterBuilder(a, b, id) {
   RateLimiterBuilder(
     per_second: None,
     per_minute: None,
     per_hour: None,
-    identifier: fn(_) { panic as "No identifier configured" },
-    handler: fn(_) { panic as "Rate limit reached" },
+    identifier: None,
+    handler: None,
   )
 }
 
@@ -160,7 +190,7 @@ pub fn handler(
   limiter: RateLimiterBuilder(a, b, id),
   handler: fn(a) -> b,
 ) -> RateLimiterBuilder(a, b, id) {
-  RateLimiterBuilder(..limiter, handler: handler)
+  RateLimiterBuilder(..limiter, handler: Some(handler))
 }
 
 /// Set the identifier function to be used to identify the rate limit.
@@ -169,33 +199,45 @@ pub fn identifier(
   limiter: RateLimiterBuilder(a, b, id),
   identifier: fn(a) -> id,
 ) -> RateLimiterBuilder(a, b, id) {
-  RateLimiterBuilder(..limiter, identifier: identifier)
+  RateLimiterBuilder(..limiter, identifier: Some(identifier))
 }
 
 /// Build the rate limiter.
 ///
-pub fn build(config: RateLimiterBuilder(a, b, id)) -> RateLimiter(a, b) {
+/// Panics if the rate limiter actor cannot be started or if the identifier
+/// function or handler function is missing.
+///
+pub fn build(config: RateLimiterBuilder(a, b, id)) -> RateLimiter(a, b, id) {
   let state =
     RateLimiterState(
       hit_log: dict.new(),
       per_second: config.per_second,
       per_minute: config.per_minute,
       per_hour: config.per_hour,
-      identifier: config.identifier,
-      handler: config.handler,
     )
-  let subject = case actor.start(state, handle_message) {
-    Ok(actor) -> actor
-    Error(_) -> panic as "Failed to start rate limiter actor"
-  }
-  RateLimiter(subject: subject, handler: config.handler)
+
+  RateLimiter(
+    subject: case actor.start(state, handle_message) {
+      Ok(subject) -> subject
+      Error(_) -> panic as "Failed to start rate limiter actor"
+    },
+    identifier: case config.identifier {
+      Some(identifier) -> identifier
+      None -> panic as "Identifier function is required"
+    },
+    handler: case config.handler {
+      Some(handler) -> handler
+      None -> panic as "Handler function is required"
+    },
+  )
 }
 
 /// Apply the rate limiter to a request handler or function.
 ///
-pub fn apply(func: fn(a) -> b, limiter: RateLimiter(a, b)) -> fn(a) -> b {
+pub fn apply(func: fn(a) -> b, limiter: RateLimiter(a, b, id)) -> fn(a) -> b {
   fn(input: a) -> b {
-    case actor.call(limiter.subject, Hit(input, _), 10) {
+    let identifier = limiter.identifier(input)
+    case actor.call(limiter.subject, Hit(identifier, _), 10) {
       Ok(Nil) -> func(input)
       Error(Nil) -> limiter.handler(input)
     }
@@ -204,6 +246,6 @@ pub fn apply(func: fn(a) -> b, limiter: RateLimiter(a, b)) -> fn(a) -> b {
 
 /// Stop the rate limiter agent.
 ///
-pub fn stop(limiter: RateLimiter(a, b)) {
+pub fn stop(limiter: RateLimiter(a, b, id)) {
   actor.send(limiter.subject, Shutdown)
 }

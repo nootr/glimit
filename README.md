@@ -2,22 +2,40 @@
 
 [![Package Version](https://img.shields.io/hexpm/v/glimit)](https://hex.pm/packages/glimit)
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/glimit/)
+[![test](https://github.com/nootr/glimit/actions/workflows/test.yml/badge.svg)](https://github.com/nootr/glimit/actions/workflows/test.yml)
 
 A framework-agnostic rate limiter for Gleam. 💫
 
 > ⚠️  This library is still in development, use at your own risk.
 
 
-## Installation
+## Usage
 
-```sh
-gleam add glimit
+A very minimalistic example of how to use `glimit` would be the following snippet:
+
+```gleam
+import glimit
+
+let limiter =
+  glimit.new()
+  |> glimit.per_second(2)
+  |> glimit.identifier(fn(x) { x })
+  |> glimit.handler(fn(_) { "Stop!" })
+  |> glimit.build
+
+let func =
+  fn(_) { "OK" }
+  |> glimit.apply(limiter)
+
+func("🚀") // "OK"
+func("💫") // "OK"
+func("💫") // "OK"
+func("💫") // "Stop!"
+func("🚀") // "OK"
+func("🚀") // "Stop!"
 ```
 
-
-## Example usage
-
-For example, `glimit` could be used to rate limit requests to a mist HTTP server:
+A more practical example would be to use `glimit` to rate limit requests to a mist HTTP server:
 
 ```gleam
 import glimit
@@ -73,9 +91,3 @@ pub fn main() {
 ```
 
 Further documentation can be found at <https://hexdocs.pm/glimit>.
-
-## Development
-
-```sh
-gleam test  # Run the tests
-```
