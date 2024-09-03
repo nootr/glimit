@@ -17,11 +17,10 @@ gleam add glimit
 
 ## Example usage
 
-Glimit could be used to rate limit requests to a mist HTTP server:
+For example, `glimit` could be used to rate limit requests to a mist HTTP server:
 
 ```gleam
 import glimit
-import gleam/bytes_builder
 
 
 fn handle_request(req: Request(Connection)) -> Response(ResponseData) {
@@ -38,24 +37,28 @@ fn handle_request(req: Request(Connection)) -> Response(ResponseData) {
   }
 }
 
+fn get_identifier(req: Request(Connection)) -> Result(String, String) {
+  req.body
+  |> get_client_info
+  |> result.map(fn(client_info: ConnectionInfo) {
+    client_info.ip_address |> string.inspect
+  })
+  |> result.unwrap("unknown IP address")
+}
+
 pub fn main() {
+  let rate_limit_reached = fn(_req) -> {
+    response.new(429)
+    |> response.set_body(mist.Bytes(bytes_builder.new()))
+  }
+
   let limiter =
     glimit.new()
     |> glimit.per_second(10)
     |> glimit.per_minute(100)
     |> glimit.per_hour(1000)
-    |> glimit.identifier(fn(req: Request(Connection)) {
-      req.body
-      |> get_client_info
-      |> result.map(fn(client_info: ConnectionInfo) {
-        client_info.ip_address |> string.inspect
-      })
-      |> result.unwrap("unknown IP address")
-    })
-    |> glimit.handler(fn(_req) {
-      response.new(429)
-      |> response.set_body(mist.Bytes(bytes_builder.new()))
-    })
+    |> glimit.identifier(get_identifier)
+    |> glimit.handler(rate_limit_reached)
     |> glimit.build
 
   let assert Ok(_) =
