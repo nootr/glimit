@@ -163,3 +163,57 @@ pub fn apply(func: fn(a) -> b, limiter: RateLimiter(a, b, id)) -> fn(a) -> b {
     }
   }
 }
+
+/// Apply the rate limiter to a request handler or function with two arguments.
+///
+/// Note: this function folds the two arguments into a tuple before passing them to the
+/// identifier or handler functions.
+///
+pub fn apply2(
+  func: fn(a, b) -> c,
+  limiter: RateLimiter(#(a, b), c, id),
+) -> fn(a, b) -> c {
+  fn(a: a, b: b) -> c {
+    let identifier = limiter.identifier(#(a, b))
+    case actor.hit(limiter.subject, identifier) {
+      Ok(Nil) -> func(a, b)
+      Error(Nil) -> limiter.handler(#(a, b))
+    }
+  }
+}
+
+/// Apply the rate limiter to a request handler or function with three arguments.
+///
+/// Note: this function folds the three arguments into a tuple before passing them to the
+/// identifier or handler functions.
+///
+pub fn apply3(
+  func: fn(a, b, c) -> d,
+  limiter: RateLimiter(#(a, b, c), d, id),
+) -> fn(a, b, c) -> d {
+  fn(a: a, b: b, c: c) -> d {
+    let identifier = limiter.identifier(#(a, b, c))
+    case actor.hit(limiter.subject, identifier) {
+      Ok(Nil) -> func(a, b, c)
+      Error(Nil) -> limiter.handler(#(a, b, c))
+    }
+  }
+}
+
+/// Apply the rate limiter to a request handler or function with four arguments.
+///
+/// Note: this function folds the four arguments into a tuple before passing them to the
+/// identifier or handler functions.
+///
+pub fn apply4(
+  func: fn(a, b, c, d) -> e,
+  limiter: RateLimiter(#(a, b, c, d), e, id),
+) -> fn(a, b, c, d) -> e {
+  fn(a: a, b: b, c: c, d: d) -> e {
+    let identifier = limiter.identifier(#(a, b, c, d))
+    case actor.hit(limiter.subject, identifier) {
+      Ok(Nil) -> func(a, b, c, d)
+      Error(Nil) -> limiter.handler(#(a, b, c, d))
+    }
+  }
+}
