@@ -169,6 +169,25 @@ pub fn apply(func: fn(a) -> b, limiter: RateLimiter(a, b, id)) -> fn(a) -> b {
 /// Note: this function folds the two arguments into a tuple before passing them to the
 /// identifier or handler functions.
 ///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.per_hour(1000)
+///   |> glimit.identifier(fn(i: #(String, String)) {
+///     let #(a, _) = i
+///     a
+///   })
+///   |> glimit.handler(fn(_) { "Rate limit reached" })
+///   |> glimit.build()
+///
+/// let handler =
+///   fn(a, b) { a <> b }
+///   |> glimit.apply2(limiter)
+/// ```
 pub fn apply2(
   func: fn(a, b) -> c,
   limiter: RateLimiter(#(a, b), c, id),
@@ -204,6 +223,11 @@ pub fn apply3(
 ///
 /// Note: this function folds the four arguments into a tuple before passing them to the
 /// identifier or handler functions.
+///
+/// > ⚠️ For functions with more than four arguments, you'll need to write a custom
+/// > wrapper function that folds the arguments into a tuple before passing them to the
+/// > rate limiter. This is because Gleam does not support variadic functions, because
+/// > the BEAM VM identifies functions by their arity.
 ///
 pub fn apply4(
   func: fn(a, b, c, d) -> e,
