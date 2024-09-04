@@ -37,9 +37,10 @@
 
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import glimit/actor
 
-/// The rate limiter's public interface.
+/// A rate limiter.
 ///
 pub type RateLimiter(a, b, id) {
   RateLimiter(
@@ -124,22 +125,31 @@ pub fn identifier(
 /// function or handler function is missing.
 ///
 pub fn build(config: RateLimiterBuilder(a, b, id)) -> RateLimiter(a, b, id) {
-  RateLimiter(
-    subject: case
-      actor.new(config.per_second, config.per_minute, config.per_hour)
-    {
-      Ok(subject) -> subject
-      Error(_) -> panic as "Failed to start rate limiter actor"
-    },
-    identifier: case config.identifier {
-      Some(identifier) -> identifier
-      None -> panic as "Identifier function is required"
-    },
-    handler: case config.handler {
-      Some(handler) -> handler
-      None -> panic as "Handler function is required"
-    },
+  case try_build(config) {
+    Ok(limiter) -> limiter
+    Error(message) -> panic as message
+  }
+}
+
+/// Build the rate limiter, but return an error instead of panicking.
+///
+pub fn try_build(
+  config: RateLimiterBuilder(a, b, id),
+) -> Result(RateLimiter(a, b, id), String) {
+  use subject <- result.try(
+    actor.new(config.per_second, config.per_minute, config.per_hour)
+    |> result.map_error(fn(_) { "Failed to start rate limiter actor" }),
   )
+  use identifier <- result.try(case config.identifier {
+    Some(identifier) -> Ok(identifier)
+    None -> Error("Identifier function is required")
+  })
+  use handler <- result.try(case config.handler {
+    Some(handler) -> Ok(handler)
+    None -> Error("Handler function is required")
+  })
+
+  Ok(RateLimiter(subject: subject, handler: handler, identifier: identifier))
 }
 
 /// Apply the rate limiter to a request handler or function.
