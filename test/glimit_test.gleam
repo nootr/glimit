@@ -11,7 +11,7 @@ pub fn single_argument_function_per_second_test() {
     glimit.new()
     |> glimit.per_second(2)
     |> glimit.identifier(fn(_) { "id" })
-    |> glimit.handler(fn(_) { "Stop!" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
   let func =
@@ -29,7 +29,7 @@ pub fn single_argument_function_per_minute_test() {
     glimit.new()
     |> glimit.per_minute(2)
     |> glimit.identifier(fn(_) { "id" })
-    |> glimit.handler(fn(_) { "Stop!" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
   let func =
@@ -47,7 +47,7 @@ pub fn single_argument_function_per_hour_test() {
     glimit.new()
     |> glimit.per_hour(2)
     |> glimit.identifier(fn(_) { "id" })
-    |> glimit.handler(fn(_) { "Stop!" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
   let func =
@@ -65,7 +65,7 @@ pub fn single_argument_function_different_ids_test() {
     glimit.new()
     |> glimit.per_second(2)
     |> glimit.identifier(fn(x) { x })
-    |> glimit.handler(fn(_) { "Stop!" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
   let func =
@@ -89,7 +89,7 @@ pub fn two_arguments_function_test() {
       let #(a, _) = i
       a
     })
-    |> glimit.handler(fn(_) { "Stop!" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
   let func =
@@ -107,7 +107,7 @@ pub fn three_arguments_function_test() {
     glimit.new()
     |> glimit.per_second(2)
     |> glimit.identifier(fn(_) { "id" })
-    |> glimit.handler(fn(_) { "Stop!" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
   let func =
@@ -124,7 +124,7 @@ pub fn four_arguments_function_test() {
     glimit.new()
     |> glimit.per_second(2)
     |> glimit.identifier(fn(_) { "id" })
-    |> glimit.handler(fn(_) { "Stop!" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
   let func =
@@ -140,7 +140,7 @@ pub fn try_build_ok_test() {
   glimit.new()
   |> glimit.per_second(2)
   |> glimit.identifier(fn(x) { x })
-  |> glimit.handler(fn(x) { x })
+  |> glimit.on_limit_exceeded(fn(x) { x })
   |> glimit.try_build
   |> should.be_ok()
 }
@@ -148,15 +148,15 @@ pub fn try_build_ok_test() {
 pub fn try_build_identifier_missing_test() {
   glimit.new()
   |> glimit.per_second(2)
-  |> glimit.handler(fn(x) { x })
+  |> glimit.on_limit_exceeded(fn(x) { x })
   |> glimit.try_build
-  |> should.equal(Error("Identifier function is required"))
+  |> should.equal(Error("`identifier` function is required"))
 }
 
-pub fn try_build_handler_missing_test() {
+pub fn try_build_on_limit_exceeded_missing_test() {
   glimit.new()
   |> glimit.per_second(2)
   |> glimit.identifier(fn(x) { x })
   |> glimit.try_build
-  |> should.equal(Error("Handler function is required"))
+  |> should.equal(Error("`on_limit_exceeded` function is required"))
 }

@@ -20,7 +20,7 @@ let limiter =
   glimit.new()
   |> glimit.per_second(2)
   |> glimit.identifier(fn(x) { x })
-  |> glimit.handler(fn(_) { "Stop!" })
+  |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
   |> glimit.build
 
 let func =
@@ -76,7 +76,7 @@ pub fn main() {
     |> glimit.per_minute(100)
     |> glimit.per_hour(1000)
     |> glimit.identifier(get_identifier)
-    |> glimit.handler(rate_limit_reached)
+    |> glimit.on_limit_exceeded(rate_limit_reached)
     |> glimit.build
 
   let assert Ok(_) =

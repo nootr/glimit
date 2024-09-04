@@ -26,7 +26,7 @@
 ////   |> glimit.per_minute(100)
 ////   |> glimit.per_hour(1000)
 ////   |> glimit.identifier(fn(request) { request.ip })
-////   |> glimit.handler(fn(_request) { "Rate limit reached" })
+////   |> glimit.on_limit_exceeded(fn(_request) { "Rate limit reached" })
 ////   |> glimit.build()
 ////
 //// let handler =
@@ -45,7 +45,7 @@ import glimit/actor
 pub type RateLimiter(a, b, id) {
   RateLimiter(
     subject: Subject(actor.Message(id)),
-    handler: fn(a) -> b,
+    on_limit_exceeded: fn(a) -> b,
     identifier: fn(a) -> id,
   )
 }
@@ -58,7 +58,7 @@ pub type RateLimiterBuilder(a, b, id) {
     per_minute: Option(Int),
     per_hour: Option(Int),
     identifier: Option(fn(a) -> id),
-    handler: Option(fn(a) -> b),
+    on_limit_exceeded: Option(fn(a) -> b),
   )
 }
 
@@ -70,7 +70,7 @@ pub fn new() -> RateLimiterBuilder(a, b, id) {
     per_minute: None,
     per_hour: None,
     identifier: None,
-    handler: None,
+    on_limit_exceeded: None,
   )
 }
 
@@ -103,11 +103,19 @@ pub fn per_hour(
 
 /// Set the handler to be called when the rate limit is reached.
 ///
+pub fn on_limit_exceeded(
+  limiter: RateLimiterBuilder(a, b, id),
+  on_limit_exceeded: fn(a) -> b,
+) -> RateLimiterBuilder(a, b, id) {
+  RateLimiterBuilder(..limiter, on_limit_exceeded: Some(on_limit_exceeded))
+}
+
+@deprecated("Use `on_limit_exceeded` instead")
 pub fn handler(
   limiter: RateLimiterBuilder(a, b, id),
-  handler: fn(a) -> b,
+  on_limit_exceeded: fn(a) -> b,
 ) -> RateLimiterBuilder(a, b, id) {
-  RateLimiterBuilder(..limiter, handler: Some(handler))
+  RateLimiterBuilder(..limiter, on_limit_exceeded: Some(on_limit_exceeded))
 }
 
 /// Set the identifier function to be used to identify the rate limit.
@@ -122,7 +130,7 @@ pub fn identifier(
 /// Build the rate limiter.
 ///
 /// Panics if the rate limiter actor cannot be started or if the identifier
-/// function or handler function is missing.
+/// function or on_limit_exceeded function is missing.
 ///
 pub fn build(config: RateLimiterBuilder(a, b, id)) -> RateLimiter(a, b, id) {
   case try_build(config) {
@@ -142,14 +150,18 @@ pub fn try_build(
   )
   use identifier <- result.try(case config.identifier {
     Some(identifier) -> Ok(identifier)
-    None -> Error("Identifier function is required")
+    None -> Error("`identifier` function is required")
   })
-  use handler <- result.try(case config.handler {
-    Some(handler) -> Ok(handler)
-    None -> Error("Handler function is required")
+  use on_limit_exceeded <- result.try(case config.on_limit_exceeded {
+    Some(on_limit_exceeded) -> Ok(on_limit_exceeded)
+    None -> Error("`on_limit_exceeded` function is required")
   })
 
-  Ok(RateLimiter(subject: subject, handler: handler, identifier: identifier))
+  Ok(RateLimiter(
+    subject: subject,
+    on_limit_exceeded: on_limit_exceeded,
+    identifier: identifier,
+  ))
 }
 
 /// Apply the rate limiter to a request handler or function.
@@ -159,7 +171,7 @@ pub fn apply(func: fn(a) -> b, limiter: RateLimiter(a, b, id)) -> fn(a) -> b {
     let identifier = limiter.identifier(input)
     case actor.hit(limiter.subject, identifier) {
       Ok(Nil) -> func(input)
-      Error(Nil) -> limiter.handler(input)
+      Error(Nil) -> limiter.on_limit_exceeded(input)
     }
   }
 }
@@ -167,7 +179,7 @@ pub fn apply(func: fn(a) -> b, limiter: RateLimiter(a, b, id)) -> fn(a) -> b {
 /// Apply the rate limiter to a request handler or function with two arguments.
 ///
 /// Note: this function folds the two arguments into a tuple before passing them to the
-/// identifier or handler functions.
+/// identifier or on_limit_exceeded functions.
 ///
 /// # Example
 ///
@@ -181,7 +193,7 @@ pub fn apply(func: fn(a) -> b, limiter: RateLimiter(a, b, id)) -> fn(a) -> b {
 ///     let #(a, _) = i
 ///     a
 ///   })
-///   |> glimit.handler(fn(_) { "Rate limit reached" })
+///   |> glimit.on_limit_exceeded(fn(_) { "Rate limit reached" })
 ///   |> glimit.build()
 ///
 /// let handler =
@@ -196,7 +208,7 @@ pub fn apply2(
     let identifier = limiter.identifier(#(a, b))
     case actor.hit(limiter.subject, identifier) {
       Ok(Nil) -> func(a, b)
-      Error(Nil) -> limiter.handler(#(a, b))
+      Error(Nil) -> limiter.on_limit_exceeded(#(a, b))
     }
   }
 }
@@ -204,7 +216,7 @@ pub fn apply2(
 /// Apply the rate limiter to a request handler or function with three arguments.
 ///
 /// Note: this function folds the three arguments into a tuple before passing them to the
-/// identifier or handler functions.
+/// identifier or on_limit_exceeded functions.
 ///
 pub fn apply3(
   func: fn(a, b, c) -> d,
@@ -214,7 +226,7 @@ pub fn apply3(
     let identifier = limiter.identifier(#(a, b, c))
     case actor.hit(limiter.subject, identifier) {
       Ok(Nil) -> func(a, b, c)
-      Error(Nil) -> limiter.handler(#(a, b, c))
+      Error(Nil) -> limiter.on_limit_exceeded(#(a, b, c))
     }
   }
 }
@@ -222,7 +234,7 @@ pub fn apply3(
 /// Apply the rate limiter to a request handler or function with four arguments.
 ///
 /// Note: this function folds the four arguments into a tuple before passing them to the
-/// identifier or handler functions.
+/// identifier or on_limit_exceeded functions.
 ///
 /// > ⚠️ For functions with more than four arguments, you'll need to write a custom
 /// > wrapper function that folds the arguments into a tuple before passing them to the
@@ -237,7 +249,7 @@ pub fn apply4(
     let identifier = limiter.identifier(#(a, b, c, d))
     case actor.hit(limiter.subject, identifier) {
       Ok(Nil) -> func(a, b, c, d)
-      Error(Nil) -> limiter.handler(#(a, b, c, d))
+      Error(Nil) -> limiter.on_limit_exceeded(#(a, b, c, d))
     }
   }
 }
