@@ -85,6 +85,10 @@ pub fn two_arguments_function_test() {
     glimit.new()
     |> glimit.per_second(2)
     |> glimit.identifier(fn(_) { "id" })
+    |> glimit.identifier(fn(i: #(String, String)) {
+      let #(a, _) = i
+      a
+    })
     |> glimit.handler(fn(_) { "Stop!" })
     |> glimit.build
 
@@ -93,6 +97,7 @@ pub fn two_arguments_function_test() {
     |> glimit.apply2(limiter)
 
   func("O", "K") |> should.equal("OK")
+  func(":", ")") |> should.equal(":)")
   func("O", "K") |> should.equal("OK")
   func("O", "K") |> should.equal("Stop!")
 }
@@ -129,4 +134,29 @@ pub fn four_arguments_function_test() {
   func("O", "K", "?", "!") |> should.equal("OK?!")
   func("O", "K", "?", "!") |> should.equal("OK?!")
   func("O", "K", "?", "!") |> should.equal("Stop!")
+}
+
+pub fn try_build_ok_test() {
+  glimit.new()
+  |> glimit.per_second(2)
+  |> glimit.identifier(fn(x) { x })
+  |> glimit.handler(fn(x) { x })
+  |> glimit.try_build
+  |> should.be_ok()
+}
+
+pub fn try_build_identifier_missing_test() {
+  glimit.new()
+  |> glimit.per_second(2)
+  |> glimit.handler(fn(x) { x })
+  |> glimit.try_build
+  |> should.equal(Error("Identifier function is required"))
+}
+
+pub fn try_build_handler_missing_test() {
+  glimit.new()
+  |> glimit.per_second(2)
+  |> glimit.identifier(fn(x) { x })
+  |> glimit.try_build
+  |> should.equal(Error("Handler function is required"))
 }
