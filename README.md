@@ -90,4 +90,19 @@ pub fn main() {
 }
 ```
 
+
+## How it works
+
+Once v1.0 is reached, `glimit` will use a distributed Token Bucket algorithm to rate limit requests. It will support multiple backend storage systems, such as Redis and in-memory storage.
+
+However, at the moment, `glimit` uses a simple Sliding Window algorithm with in-memory storage. This means that the rate limiter is not memory efficient and is not ready for production use.
+
+
+## Documentation
+
 Further documentation can be found at <https://hexdocs.pm/glimit>.
+
+
+## Contributing
+
+Contributions like PR's, bug reports or suggestions are more than welcome! ♥️
