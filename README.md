@@ -4,9 +4,17 @@
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/glimit/)
 [![test](https://github.com/nootr/glimit/actions/workflows/test.yml/badge.svg)](https://github.com/nootr/glimit/actions/workflows/test.yml)
 
-A framework-agnostic rate limiter for Gleam. 💫
+A simple, framework-agnostic, in-memory rate limiter for Gleam. 💫
 
 > ⚠️  This library is still in development, use at your own risk.
+
+
+## Features
+
+* ✨ Simple and easy to use.
+* 📏 Rate limits based on any key (e.g. IP address, or user ID).
+* 🪣 Uses a distributed Token Bucket algorithm to rate limit requests.
+* 🗄️ No back-end service needed; stores rate limit stats in-memory.
 
 
 ## Usage
@@ -73,8 +81,6 @@ pub fn main() {
   let limiter =
     glimit.new()
     |> glimit.per_second(10)
-    |> glimit.per_minute(100)
-    |> glimit.per_hour(1000)
     |> glimit.identifier(get_identifier)
     |> glimit.on_limit_exceeded(rate_limit_reached)
     |> glimit.build
@@ -91,16 +97,16 @@ pub fn main() {
 ```
 
 
-## How it works
+## Constraints
 
-Once v1.0 is reached, `glimit` will use a distributed Token Bucket algorithm to rate limit requests. It will support multiple backend storage systems, such as Redis and in-memory storage.
+While the in-memory rate limiter is simple and easy to use, it does have an important constraint: it is scoped to the BEAM VM cluster it runs in. This means that if your application is running across multiple BEAM VM clusters, the rate limiter will not be shared between them.
 
-However, at the moment, `glimit` uses a simple Sliding Window algorithm with in-memory storage. This means that the rate limiter is not memory efficient and is not ready for production use.
+There are plans to add support for a centralized data store using Redis in the future.
 
 
 ## Documentation
 
-Further documentation can be found at <https://hexdocs.pm/glimit>.
+Further documentation can be found at <https://hexdocs.pm/glimit/glimit.html>.
 
 
 ## Contributing

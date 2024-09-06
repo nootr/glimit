@@ -1,16 +1,19 @@
-//// A framework-agnostic rate limiter for Gleam. 💫
+//// This module provides a distributed rate limiter that can be used to limit the
+//// number of requests or function calls per second for a given identifier.
 ////
-//// This module provides a rate limiter that can be used to limit the number of
-//// requests that can be made to a given function or handler within a given
-//// time frame.
+//// A single actor is used to assign one rate limiter actor per identifier. The
+//// rate limiter actor then uses a Token Bucket algorithm to determine if a
+//// request or function call should be allowed to proceed. A separate process is
+//// polling the rate limiters to remove full buckets to reduce unnecessary memory
+//// usage.
 ////
-//// The rate limiter is implemented as an actor that keeps track of the number
-//// of hits for a given identifier within the last second, minute, and hour.
-//// When a hit is received, the actor checks the rate limits and either allows
-//// the hit to pass or rejects it.
+//// The rate limits are configured using the following two options:
 ////
-//// The rate limiter can be configured with rate limits per second, minute, and
-//// hour, and a handler function that is called when the rate limit is reached.
+//// - `per_second`: The rate of new available tokens per second. Think of this
+////   as the steady state rate limit.
+//// - `burst_limit`: The maximum number of available tokens. Think of this as
+////   the burst rate limit. The default value is the `per_second` rate limit.
+////
 //// The rate limiter can be applied to a function or handler using the `apply`
 //// function, which returns a new function that checks the rate limit before
 //// calling the original function.
@@ -23,8 +26,6 @@
 //// let limiter =
 ////   glimit.new()
 ////   |> glimit.per_second(10)
-////   |> glimit.per_minute(100)
-////   |> glimit.per_hour(1000)
 ////   |> glimit.identifier(fn(request) { request.ip })
 ////   |> glimit.on_limit_exceeded(fn(_request) { "Rate limit reached" })
 ////   |> glimit.build()
@@ -35,16 +36,16 @@
 //// ```
 ////
 
-import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import glimit/actor
+import glimit/rate_limiter
+import glimit/registry.{type RateLimiterRegistryActor}
 
 /// A rate limiter.
 ///
 pub type RateLimiter(a, b, id) {
   RateLimiter(
-    subject: Subject(actor.Message(id)),
+    rate_limiter_registry: RateLimiterRegistryActor(id),
     on_limit_exceeded: fn(a) -> b,
     identifier: fn(a) -> id,
   )
@@ -55,8 +56,7 @@ pub type RateLimiter(a, b, id) {
 pub type RateLimiterBuilder(a, b, id) {
   RateLimiterBuilder(
     per_second: Option(Int),
-    per_minute: Option(Int),
-    per_hour: Option(Int),
+    burst_limit: Option(Int),
     identifier: Option(fn(a) -> id),
     on_limit_exceeded: Option(fn(a) -> b),
   )
@@ -67,14 +67,17 @@ pub type RateLimiterBuilder(a, b, id) {
 pub fn new() -> RateLimiterBuilder(a, b, id) {
   RateLimiterBuilder(
     per_second: None,
-    per_minute: None,
-    per_hour: None,
+    burst_limit: None,
     identifier: None,
     on_limit_exceeded: None,
   )
 }
 
 /// Set the rate limit per second.
+///
+/// The value is not only used for the rate at which tokens are added to the bucket, but
+/// also for the maximum number of available tokens. To set a different value fo the
+/// maximum number of available tokens, use the `burst_limit` function.
 ///
 pub fn per_second(
   limiter: RateLimiterBuilder(a, b, id),
@@ -83,35 +86,21 @@ pub fn per_second(
   RateLimiterBuilder(..limiter, per_second: Some(limit))
 }
 
-/// Set the rate limit per minute.
+/// Set the maximum number of available tokens.
 ///
-pub fn per_minute(
-  limiter: RateLimiterBuilder(a, b, id),
-  limit: Int,
-) -> RateLimiterBuilder(a, b, id) {
-  RateLimiterBuilder(..limiter, per_minute: Some(limit))
-}
-
-/// Set the rate limit per hour.
+/// The maximum number of available tokens is the maximum number of requests that can be
+/// made in a single second. The default value is the same as the rate limit per second.
 ///
-pub fn per_hour(
+pub fn burst_limit(
   limiter: RateLimiterBuilder(a, b, id),
-  limit: Int,
+  burst_limit: Int,
 ) -> RateLimiterBuilder(a, b, id) {
-  RateLimiterBuilder(..limiter, per_hour: Some(limit))
+  RateLimiterBuilder(..limiter, burst_limit: Some(burst_limit))
 }
 
 /// Set the handler to be called when the rate limit is reached.
 ///
 pub fn on_limit_exceeded(
-  limiter: RateLimiterBuilder(a, b, id),
-  on_limit_exceeded: fn(a) -> b,
-) -> RateLimiterBuilder(a, b, id) {
-  RateLimiterBuilder(..limiter, on_limit_exceeded: Some(on_limit_exceeded))
-}
-
-@deprecated("Use `on_limit_exceeded` instead")
-pub fn handler(
   limiter: RateLimiterBuilder(a, b, id),
   on_limit_exceeded: fn(a) -> b,
 ) -> RateLimiterBuilder(a, b, id) {
@@ -129,8 +118,10 @@ pub fn identifier(
 
 /// Build the rate limiter.
 ///
-/// Panics if the rate limiter actor cannot be started or if the identifier
-/// function or on_limit_exceeded function is missing.
+/// Panics if the rate limiter registry cannot be started or if the `identifier`
+/// function or `on_limit_exceeded` function is missing.
+///
+/// To handle errors instead of panicking, use `try_build`.
 ///
 pub fn build(config: RateLimiterBuilder(a, b, id)) -> RateLimiter(a, b, id) {
   case try_build(config) {
@@ -144,9 +135,17 @@ pub fn build(config: RateLimiterBuilder(a, b, id)) -> RateLimiter(a, b, id) {
 pub fn try_build(
   config: RateLimiterBuilder(a, b, id),
 ) -> Result(RateLimiter(a, b, id), String) {
-  use subject <- result.try(
-    actor.new(config.per_second, config.per_minute, config.per_hour)
-    |> result.map_error(fn(_) { "Failed to start rate limiter actor" }),
+  use per_second <- result.try(case config.per_second {
+    Some(per_second) -> Ok(per_second)
+    None -> Error("`per_second` rate limit is required")
+  })
+  let burst_limit = case config.burst_limit {
+    Some(burst_limit) -> burst_limit
+    None -> per_second
+  }
+  use rate_limiter_registry <- result.try(
+    registry.new(per_second, burst_limit)
+    |> result.map_error(fn(_) { "Failed to start rate limiter registry" }),
   )
   use identifier <- result.try(case config.identifier {
     Some(identifier) -> Ok(identifier)
@@ -158,7 +157,7 @@ pub fn try_build(
   })
 
   Ok(RateLimiter(
-    subject: subject,
+    rate_limiter_registry: rate_limiter_registry,
     on_limit_exceeded: on_limit_exceeded,
     identifier: identifier,
   ))
@@ -169,87 +168,14 @@ pub fn try_build(
 pub fn apply(func: fn(a) -> b, limiter: RateLimiter(a, b, id)) -> fn(a) -> b {
   fn(input: a) -> b {
     let identifier = limiter.identifier(input)
-    case actor.hit(limiter.subject, identifier) {
-      Ok(Nil) -> func(input)
-      Error(Nil) -> limiter.on_limit_exceeded(input)
-    }
-  }
-}
-
-/// Apply the rate limiter to a request handler or function with two arguments.
-///
-/// Note: this function folds the two arguments into a tuple before passing them to the
-/// identifier or on_limit_exceeded functions.
-///
-/// # Example
-///
-/// ```gleam
-/// import glimit
-///
-/// let limiter =
-///   glimit.new()
-///   |> glimit.per_hour(1000)
-///   |> glimit.identifier(fn(i: #(String, String)) {
-///     let #(a, _) = i
-///     a
-///   })
-///   |> glimit.on_limit_exceeded(fn(_) { "Rate limit reached" })
-///   |> glimit.build()
-///
-/// let handler =
-///   fn(a, b) { a <> b }
-///   |> glimit.apply2(limiter)
-/// ```
-pub fn apply2(
-  func: fn(a, b) -> c,
-  limiter: RateLimiter(#(a, b), c, id),
-) -> fn(a, b) -> c {
-  fn(a: a, b: b) -> c {
-    let identifier = limiter.identifier(#(a, b))
-    case actor.hit(limiter.subject, identifier) {
-      Ok(Nil) -> func(a, b)
-      Error(Nil) -> limiter.on_limit_exceeded(#(a, b))
-    }
-  }
-}
-
-/// Apply the rate limiter to a request handler or function with three arguments.
-///
-/// Note: this function folds the three arguments into a tuple before passing them to the
-/// identifier or on_limit_exceeded functions.
-///
-pub fn apply3(
-  func: fn(a, b, c) -> d,
-  limiter: RateLimiter(#(a, b, c), d, id),
-) -> fn(a, b, c) -> d {
-  fn(a: a, b: b, c: c) -> d {
-    let identifier = limiter.identifier(#(a, b, c))
-    case actor.hit(limiter.subject, identifier) {
-      Ok(Nil) -> func(a, b, c)
-      Error(Nil) -> limiter.on_limit_exceeded(#(a, b, c))
-    }
-  }
-}
-
-/// Apply the rate limiter to a request handler or function with four arguments.
-///
-/// Note: this function folds the four arguments into a tuple before passing them to the
-/// identifier or on_limit_exceeded functions.
-///
-/// > ⚠️ For functions with more than four arguments, you'll need to write a custom
-/// > wrapper function that folds the arguments into a tuple before passing them to the
-/// > rate limiter. This is because Gleam does not support variadic functions, because
-/// > the BEAM VM identifies functions by their arity.
-///
-pub fn apply4(
-  func: fn(a, b, c, d) -> e,
-  limiter: RateLimiter(#(a, b, c, d), e, id),
-) -> fn(a, b, c, d) -> e {
-  fn(a: a, b: b, c: c, d: d) -> e {
-    let identifier = limiter.identifier(#(a, b, c, d))
-    case actor.hit(limiter.subject, identifier) {
-      Ok(Nil) -> func(a, b, c, d)
-      Error(Nil) -> limiter.on_limit_exceeded(#(a, b, c, d))
+    case limiter.rate_limiter_registry |> registry.get_or_create(identifier) {
+      Ok(rate_limiter) -> {
+        case rate_limiter |> rate_limiter.hit {
+          Ok(Nil) -> func(input)
+          Error(Nil) -> limiter.on_limit_exceeded(input)
+        }
+      }
+      Error(_) -> panic as "Failed to get rate limiter"
     }
   }
 }
