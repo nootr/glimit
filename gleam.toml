@@ -1,10 +1,13 @@
 name = "glimit"
 version = "0.1.3"
 
-description = "A framework-agnostic rate limiter for Gleam."
+description = "A simple, framework-agnostic, in-memory rate limiter for Gleam."
 licences = ["MIT"]
 repository = { type = "github", user = "nootr", repo = "glimit" }
 target = "erlang"
+internal_modules = [
+  "glimit/*",
+]
 
 [dependencies]
 gleam_stdlib = ">= 0.34.0 and < 2.0.0"

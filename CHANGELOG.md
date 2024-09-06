@@ -7,9 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Changed
+### Breaking changes
 
-- Deprecated `glimit.handler` and renamed it to the more descriptive `glimit.on_limit_exceeded`.
+- Refactored the code to use a Token Bucket algorithm instead of a Sliding Window algorithm. This has removed some of the library features/API, such as `glimit.applyX` to apply a rate limiter on a function with multiple arguments.
+
+### Added
+
+- Added a `burst_limit` setting to the limiter configuration. This setting allows the user to set the maximum number of tokens that the bucket can hold.
 
 
 ## v0.1.3 - 2024-09-04
