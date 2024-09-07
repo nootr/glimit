@@ -34,7 +34,12 @@ pub type Message(id) {
     identifier: id,
     reply_with: Subject(Result(Subject(rate_limiter.Message), Nil)),
   )
-  Sweep
+  /// Return a list of rate limiters.
+  ///
+  GetAll(reply_with: Subject(List(#(id, Subject(rate_limiter.Message)))))
+  /// Remove a rate limiter from the registry.
+  ///
+  Remove(identifier: id, reply_with: Subject(Nil))
 }
 
 fn handle_get_or_create(
@@ -55,8 +60,6 @@ fn handle_get_or_create(
   }
 }
 
-/// Shutdown and remove all rate limiters that are not alive.
-///
 fn handle_message(
   message: Message(id),
   state: State(id),
@@ -76,24 +79,18 @@ fn handle_message(
         }
       }
     }
-    Sweep -> {
-      let full_buckets =
+    GetAll(client) -> {
+      let rate_limiters =
         state.registry
         |> dict.to_list
-        |> list.filter(fn(pair) {
-          let #(_, rate_limiter) = pair
-          rate_limiter |> rate_limiter.has_full_bucket
-        })
-        |> list.map(fn(pair) {
-          let #(identifier, rate_limiter) = pair
-          actor.send(rate_limiter, rate_limiter.Shutdown)
-          identifier
-        })
 
-      let registry = state.registry |> dict.drop(full_buckets)
-
+      actor.send(client, rate_limiters)
+      actor.continue(state)
+    }
+    Remove(identifier, client) -> {
+      let registry = state.registry |> dict.delete(identifier)
       let state = State(..state, registry: registry)
-
+      actor.send(client, Nil)
       actor.continue(state)
     }
   }
@@ -116,7 +113,7 @@ pub fn new(
     |> result.nil_error,
   )
 
-  task.async(fn() { sweep_loop(registry) })
+  task.async(fn() { sweep_loop(registry, 10) })
 
   Ok(registry)
 }
@@ -130,14 +127,50 @@ pub fn get_or_create(
   actor.call(registry, GetOrCreate(identifier, _), 10)
 }
 
-fn sweep_loop(registry: RateLimiterRegistryActor(id)) {
-  process.sleep(10_000)
-  sweep(registry)
-  sweep_loop(registry)
+/// Return a list of rate limiters.
+///
+pub fn get_all(
+  registry: RateLimiterRegistryActor(id),
+) -> List(#(id, Subject(rate_limiter.Message))) {
+  actor.call(registry, GetAll, 10)
 }
 
-/// Sweep the registry and remove all rate limiters that have a full bucket.
+/// Remove a rate limiter from the registry.
 ///
-pub fn sweep(registry: RateLimiterRegistryActor(id)) {
-  actor.send(registry, Sweep)
+pub fn remove(
+  registry: RateLimiterRegistryActor(id),
+  identifier: id,
+) -> Result(Nil, Nil) {
+  actor.call(registry, Remove(identifier, _), 10)
+  Ok(Nil)
+}
+
+/// Remove full buckets from the registry.
+///
+/// It does so in four steps:
+///
+/// 1. Fetch a list of all rate limiters.
+/// 2. Check which rate limiters have a full bucket.
+/// 3. Remove the rate limiters with a full bucket from the registry.
+/// 4. Send a shutdown message to the rate limiters with a full bucket.
+///
+/// This function is repeated periodically.
+///
+fn sweep_loop(registry: RateLimiterRegistryActor(id), interval_secs: Int) {
+  process.sleep(interval_secs * 1000)
+
+  get_all(registry)
+  |> list.filter(fn(pair) {
+    let #(_, rate_limiter) = pair
+    rate_limiter
+    |> rate_limiter.has_full_bucket
+  })
+  |> list.map(fn(pair) {
+    let #(identifier, rate_limiter) = pair
+    let _ = remove(registry, identifier)
+    rate_limiter |> rate_limiter.shutdown
+    identifier
+  })
+
+  sweep_loop(registry, interval_secs)
 }

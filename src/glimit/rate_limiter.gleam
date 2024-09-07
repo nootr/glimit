@@ -107,6 +107,12 @@ pub fn new(
   |> result.nil_error
 }
 
+/// Stop the rate limiter actor.
+///
+pub fn shutdown(rate_limiter: Subject(Message)) -> Nil {
+  actor.send(rate_limiter, Shutdown)
+}
+
 /// Mark a hit on the rate limiter actor.
 ///
 pub fn hit(rate_limiter: Subject(Message)) -> Result(Nil, Nil) {
