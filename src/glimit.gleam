@@ -26,6 +26,7 @@
 //// let limiter =
 ////   glimit.new()
 ////   |> glimit.per_second(10)
+////   |> glimit.burst_limit(100)
 ////   |> glimit.identifier(fn(request) { request.ip })
 ////   |> glimit.on_limit_exceeded(fn(_request) { "Rate limit reached" })
 ////   |> glimit.build()

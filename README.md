@@ -81,6 +81,7 @@ pub fn main() {
   let limiter =
     glimit.new()
     |> glimit.per_second(10)
+    |> glimit.burst_limit(100)
     |> glimit.identifier(get_identifier)
     |> glimit.on_limit_exceeded(rate_limit_reached)
     |> glimit.build
