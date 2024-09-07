@@ -4,6 +4,7 @@
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/task
 import gleam/result
@@ -116,7 +117,7 @@ pub fn new(
     |> result.nil_error,
   )
 
-  task.async(fn() { sweep_loop(registry, 10) })
+  task.async(fn() { sweep(registry, Some(10)) })
 
   Ok(registry)
 }
@@ -159,8 +160,11 @@ pub fn remove(
 ///
 /// This function is repeated periodically.
 ///
-fn sweep_loop(registry: RateLimiterRegistryActor(id), interval_secs: Int) {
-  process.sleep(interval_secs * 1000)
+pub fn sweep(registry: RateLimiterRegistryActor(id), interval_secs: Option(Int)) {
+  case interval_secs {
+    Some(i) -> process.sleep(i * 1000)
+    None -> Nil
+  }
 
   get_all(registry)
   |> list.filter(fn(pair) {
@@ -175,5 +179,8 @@ fn sweep_loop(registry: RateLimiterRegistryActor(id), interval_secs: Int) {
     identifier
   })
 
-  sweep_loop(registry, interval_secs)
+  case interval_secs {
+    Some(_) -> sweep(registry, interval_secs)
+    None -> Nil
+  }
 }
