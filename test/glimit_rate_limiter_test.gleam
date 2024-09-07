@@ -2,10 +2,7 @@ import gleeunit/should
 import glimit/rate_limiter
 
 pub fn rate_limiter_test() {
-  let limiter = case rate_limiter.new(2, 2) {
-    Ok(limiter) -> limiter
-    Error(_) -> panic as "Should be able to create rate limiter"
-  }
+  let assert Ok(limiter) = rate_limiter.new(2, 2)
 
   limiter
   |> rate_limiter.hit

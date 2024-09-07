@@ -80,4 +80,18 @@ pub fn burst_limit_test() {
   func(Nil) |> should.equal("OK")
   func(Nil) |> should.equal("Stop!")
   func(Nil) |> should.equal("Stop!")
+
+  rate_limiter |> rate_limiter.set_now(6)
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("Stop!")
+  func(Nil) |> should.equal("Stop!")
+
+  rate_limiter |> rate_limiter.set_now(13)
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("Stop!")
+  func(Nil) |> should.equal("Stop!")
 }
