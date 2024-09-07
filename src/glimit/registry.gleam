@@ -13,6 +13,7 @@ pub type RateLimiterRegistryActor(id) =
   Subject(Message(id))
 
 /// The rate limiter registry state.
+///
 type State(id) {
   State(
     /// The maximum number of tokens.
@@ -79,6 +80,7 @@ fn handle_message(
         }
       }
     }
+
     GetAll(client) -> {
       let rate_limiters =
         state.registry
@@ -87,6 +89,7 @@ fn handle_message(
       actor.send(client, rate_limiters)
       actor.continue(state)
     }
+
     Remove(identifier, client) -> {
       let registry = state.registry |> dict.delete(identifier)
       let state = State(..state, registry: registry)
