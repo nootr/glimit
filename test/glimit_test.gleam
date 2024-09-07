@@ -1,7 +1,8 @@
-import gleam/erlang/process
 import gleeunit
 import gleeunit/should
 import glimit
+import glimit/rate_limiter
+import glimit/registry
 
 pub fn main() {
   gleeunit.main()
@@ -48,7 +49,7 @@ pub fn single_argument_function_different_ids_test() {
 pub fn burst_limit_test() {
   let limiter =
     glimit.new()
-    |> glimit.per_second(2)
+    |> glimit.per_second(1)
     |> glimit.burst_limit(3)
     |> glimit.identifier(fn(_) { "id" })
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
@@ -58,15 +59,23 @@ pub fn burst_limit_test() {
     fn(_) { "OK" }
     |> glimit.apply(limiter)
 
+  let assert Ok(rate_limiter) =
+    limiter.rate_limiter_registry
+    |> registry.get_or_create("id")
+
+  rate_limiter |> rate_limiter.set_now(0)
   func(Nil) |> should.equal("OK")
   func(Nil) |> should.equal("OK")
   func(Nil) |> should.equal("OK")
   func(Nil) |> should.equal("Stop!")
   func(Nil) |> should.equal("Stop!")
 
-  // TODO: mock time to avoid sleeping 😴
-  process.sleep(1000)
+  rate_limiter |> rate_limiter.set_now(1)
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("Stop!")
+  func(Nil) |> should.equal("Stop!")
 
+  rate_limiter |> rate_limiter.set_now(3)
   func(Nil) |> should.equal("OK")
   func(Nil) |> should.equal("OK")
   func(Nil) |> should.equal("Stop!")
