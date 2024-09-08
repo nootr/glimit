@@ -43,59 +43,7 @@ func("🚀") // "OK"
 func("🚀") // "Stop!"
 ```
 
-A more practical example would be to use `glimit` to rate limit requests to a mist HTTP server:
-
-```gleam
-import glimit
-
-
-fn handle_request(req: Request(Connection)) -> Response(ResponseData) {
-  let index =
-    response.new(200)
-    |> response.set_body(mist.Bytes(bytes_builder.new()))
-  let not_found =
-    response.new(404)
-    |> response.set_body(mist.Bytes(bytes_builder.new()))
-
-  case request.path_segments(req) {
-    [] -> index
-    _ -> not_found
-  }
-}
-
-fn get_identifier(req: Request(Connection)) -> Result(String, String) {
-  req.body
-  |> get_client_info
-  |> result.map(fn(client_info: ConnectionInfo) {
-    client_info.ip_address |> string.inspect
-  })
-  |> result.unwrap("unknown IP address")
-}
-
-pub fn main() {
-  let rate_limit_reached = fn(_req) -> {
-    response.new(429)
-    |> response.set_body(mist.Bytes(bytes_builder.new()))
-  }
-
-  let limiter =
-    glimit.new()
-    |> glimit.per_second(10)
-    |> glimit.burst_limit(100)
-    |> glimit.identifier(get_identifier)
-    |> glimit.on_limit_exceeded(rate_limit_reached)
-    |> glimit.build
-
-  let assert Ok(_) =
-    handle_request
-    |> glimit.apply(limiter)
-    |> mist.new
-    |> mist.port(8080)
-    |> mist.start_http
-
-  process.sleep_forever()
-}
-```
+More practical examples can be found in the `examples/` directory, such as Wisp and Mist server examples.
 
 
 ## Constraints
