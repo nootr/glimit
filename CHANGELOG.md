@@ -7,15 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+
+## 0.3.0 - 2024-09-09
+
+### Breaking changes
+
+- Removed the need for `glimit.build()` and `glimit.try_build()` functions. Now, the `glimit.apply()` function can be used directly with the limiter configuration.
+
 ### Added
 
 - Added the `per_second_fn` and `burst_limit_fn` functions to dynamically set limits based on the identifier.
 - Added examples to the `examples/` directory.
 - Added examples to the documentation.
-
-### Changed
-
-- Removed the need for `glimit.build()` and `glimit.try_build()` functions. Now, the `glimit.apply()` function can be used directly with the limiter configuration.
 
 
 ## 0.2.0 - 2024-09-07
