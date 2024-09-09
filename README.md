@@ -29,7 +29,6 @@ let limiter =
   |> glimit.per_second(2)
   |> glimit.identifier(fn(x) { x })
   |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
-  |> glimit.build
 
 let func =
   fn(_) { "OK" }

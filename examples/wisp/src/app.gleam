@@ -23,7 +23,6 @@ pub fn main() {
       let body = string_builder.from_string("<h1>Too many requests</h1>")
       wisp.html_response(body, 429)
     })
-    |> glimit.build
 
   wisp.configure_logger()
 

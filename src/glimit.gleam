@@ -29,7 +29,6 @@
 ////   |> glimit.burst_limit(100)
 ////   |> glimit.identifier(fn(request) { request.ip })
 ////   |> glimit.on_limit_exceeded(fn(_request) { "Rate limit reached" })
-////   |> glimit.build()
 ////
 //// let handler =
 ////   fn(_request) { "Hello, world!" }
@@ -119,21 +118,14 @@ pub fn identifier(
 
 /// Build the rate limiter.
 ///
-/// Panics if the rate limiter registry cannot be started or if the `identifier`
-/// function or `on_limit_exceeded` function is missing.
+/// Note that using `apply` will already build the rate limiter, so this function is
+/// only useful if you want to build the rate limiter manually and apply it to multiple
+/// functions.
 ///
-/// To handle errors instead of panicking, use `try_build`.
+/// To apply the resulting rate limiter to a function or handler, use the `apply_built`
+/// function.
 ///
-pub fn build(config: RateLimiterBuilder(a, b, id)) -> RateLimiter(a, b, id) {
-  case try_build(config) {
-    Ok(limiter) -> limiter
-    Error(message) -> panic as message
-  }
-}
-
-/// Build the rate limiter, but return an error instead of panicking.
-///
-pub fn try_build(
+pub fn build(
   config: RateLimiterBuilder(a, b, id),
 ) -> Result(RateLimiter(a, b, id), String) {
   use per_second <- result.try(case config.per_second {
@@ -166,7 +158,29 @@ pub fn try_build(
 
 /// Apply the rate limiter to a request handler or function.
 ///
-pub fn apply(func: fn(a) -> b, limiter: RateLimiter(a, b, id)) -> fn(a) -> b {
+/// Panics if the rate limiter registry cannot be started or if the `identifier`
+/// function or `on_limit_exceeded` function is missing.
+///
+pub fn apply(
+  func: fn(a) -> b,
+  config: RateLimiterBuilder(a, b, id),
+) -> fn(a) -> b {
+  let limiter = case build(config) {
+    Ok(limiter) -> limiter
+    Error(message) -> panic as message
+  }
+  apply_built(func, limiter)
+}
+
+/// Apply the rate limiter to a request handler or function.
+///
+/// This function is useful if you want to build the rate limiter manually using the
+/// `build` function.
+///
+pub fn apply_built(
+  func: fn(a) -> b,
+  limiter: RateLimiter(a, b, id),
+) -> fn(a) -> b {
   fn(input: a) -> b {
     let identifier = limiter.identifier(input)
     case limiter.rate_limiter_registry |> registry.get_or_create(identifier) {

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+
+### Changed
+
+- Removed the need for `glimit.build()` and `glimit.try_build()` functions. Now, the `glimit.apply()` function can be used directly with the limiter configuration.
+
+
 ## 0.2.0 - 2024-09-07
 
 ### Breaking changes
@@ -16,7 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Added a `burst_limit` setting to the limiter configuration. This setting allows the user to set the maximum number of tokens that the bucket can hold.
 
 
-## v0.1.3 - 2024-09-04
+## 0.1.3 - 2024-09-04
 
 ### Added
 

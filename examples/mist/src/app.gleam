@@ -46,7 +46,6 @@ pub fn main() {
     |> glimit.burst_limit(5)
     |> glimit.identifier(get_ip_address)
     |> glimit.on_limit_exceeded(rate_limit_reached)
-    |> glimit.build
 
   let assert Ok(_) =
     handle_request

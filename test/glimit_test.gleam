@@ -14,7 +14,6 @@ pub fn single_argument_function_per_second_test() {
     |> glimit.per_second(2)
     |> glimit.identifier(fn(_) { "id" })
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
-    |> glimit.build
 
   let func =
     fn(_) { "OK" }
@@ -32,7 +31,6 @@ pub fn single_argument_function_different_ids_test() {
     |> glimit.per_second(2)
     |> glimit.identifier(fn(x) { x })
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
-    |> glimit.build
 
   let func =
     fn(_) { "OK" }
@@ -47,7 +45,7 @@ pub fn single_argument_function_different_ids_test() {
 }
 
 pub fn burst_limit_test() {
-  let limiter =
+  let assert Ok(limiter) =
     glimit.new()
     |> glimit.per_second(1)
     |> glimit.burst_limit(3)
@@ -57,7 +55,7 @@ pub fn burst_limit_test() {
 
   let func =
     fn(_) { "OK" }
-    |> glimit.apply(limiter)
+    |> glimit.apply_built(limiter)
 
   let assert Ok(rate_limiter) =
     limiter.rate_limiter_registry
