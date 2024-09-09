@@ -19,10 +19,10 @@ type State(id) {
   State(
     /// The maximum number of tokens.
     ///
-    max_token_count: Int,
+    max_token_count: fn(id) -> Int,
     /// The rate of token generation per second.
     ///
-    token_rate: Int,
+    token_rate: fn(id) -> Int,
     /// The registry of rate limiters.
     ///
     registry: Dict(id, Subject(rate_limiter.Message)),
@@ -54,8 +54,8 @@ fn handle_get_or_create(
     }
     Error(_) -> {
       use rate_limiter <- result.try(rate_limiter.new(
-        state.max_token_count,
-        state.token_rate,
+        state.max_token_count(identifier),
+        state.token_rate(identifier),
       ))
       Ok(rate_limiter)
     }
@@ -103,8 +103,8 @@ fn handle_message(
 /// Create a new rate limiter registry.
 ///
 pub fn new(
-  per_second: Int,
-  burst_limit: Int,
+  per_second: fn(id) -> Int,
+  burst_limit: fn(id) -> Int,
 ) -> Result(RateLimiterRegistryActor(id), Nil) {
   let state =
     State(

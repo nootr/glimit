@@ -4,7 +4,7 @@ import glimit/rate_limiter
 import glimit/registry
 
 pub fn same_id_same_actor_test() {
-  let assert Ok(registry) = registry.new(2, 2)
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   let assert Ok(rate_limiter) = registry |> registry.get_or_create("🚀")
   let assert Ok(same_rate_limiter) = registry |> registry.get_or_create("🚀")
 
@@ -13,7 +13,7 @@ pub fn same_id_same_actor_test() {
 }
 
 pub fn other_id_other_actor_test() {
-  let assert Ok(registry) = registry.new(2, 2)
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   let assert Ok(rate_limiter) = registry |> registry.get_or_create("🚀")
   let assert Ok(same_rate_limiter) = registry |> registry.get_or_create("💫")
 
@@ -22,7 +22,7 @@ pub fn other_id_other_actor_test() {
 }
 
 pub fn sweep_full_bucket_test() {
-  let assert Ok(registry) = registry.new(2, 2)
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   let assert Ok(rate_limiter) = registry |> registry.get_or_create("🚀")
 
   registry |> registry.sweep(None)
@@ -34,7 +34,7 @@ pub fn sweep_full_bucket_test() {
 }
 
 pub fn sweep_not_full_bucket_test() {
-  let assert Ok(registry) = registry.new(2, 2)
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   let assert Ok(rate_limiter) = registry |> registry.get_or_create("🚀")
 
   let _ = rate_limiter |> rate_limiter.hit
@@ -47,7 +47,7 @@ pub fn sweep_not_full_bucket_test() {
 }
 
 pub fn sweep_after_long_time_test() {
-  let assert Ok(registry) = registry.new(2, 2)
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   let assert Ok(rate_limiter) = registry |> registry.get_or_create("🚀")
 
   rate_limiter |> rate_limiter.set_now(0)

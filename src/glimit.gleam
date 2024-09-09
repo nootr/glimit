@@ -55,8 +55,8 @@ pub type RateLimiter(a, b, id) {
 ///
 pub type RateLimiterBuilder(a, b, id) {
   RateLimiterBuilder(
-    per_second: Option(Int),
-    burst_limit: Option(Int),
+    per_second: Option(fn(id) -> Int),
+    burst_limit: Option(fn(id) -> Int),
     identifier: Option(fn(a) -> id),
     on_limit_exceeded: Option(fn(a) -> b),
   )
@@ -83,7 +83,16 @@ pub fn per_second(
   limiter: RateLimiterBuilder(a, b, id),
   limit: Int,
 ) -> RateLimiterBuilder(a, b, id) {
-  RateLimiterBuilder(..limiter, per_second: Some(limit))
+  RateLimiterBuilder(..limiter, per_second: Some(fn(_) { limit }))
+}
+
+/// Set the rate limit per second, based on the identifier.
+///
+pub fn per_second_fn(
+  limiter: RateLimiterBuilder(a, b, id),
+  limit_fn: fn(id) -> Int,
+) -> RateLimiterBuilder(a, b, id) {
+  RateLimiterBuilder(..limiter, per_second: Some(limit_fn))
 }
 
 /// Set the maximum number of available tokens.
@@ -95,7 +104,16 @@ pub fn burst_limit(
   limiter: RateLimiterBuilder(a, b, id),
   burst_limit: Int,
 ) -> RateLimiterBuilder(a, b, id) {
-  RateLimiterBuilder(..limiter, burst_limit: Some(burst_limit))
+  RateLimiterBuilder(..limiter, burst_limit: Some(fn(_) { burst_limit }))
+}
+
+/// Set the maximum number of available tokens, based on the identifier.
+///
+pub fn burst_limit_fn(
+  limiter: RateLimiterBuilder(a, b, id),
+  burst_limit_fn: fn(id) -> Int,
+) -> RateLimiterBuilder(a, b, id) {
+  RateLimiterBuilder(..limiter, burst_limit: Some(burst_limit_fn))
 }
 
 /// Set the handler to be called when the rate limit is reached.
