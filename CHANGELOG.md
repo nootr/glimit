@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - Added the `per_second_fn` and `burst_limit_fn` functions to dynamically set limits based on the identifier.
+- Added examples to the `examples/` directory.
+- Added examples to the documentation.
 
 ### Changed
 

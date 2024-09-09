@@ -73,11 +73,24 @@ pub fn new() -> RateLimiterBuilder(a, b, id) {
   )
 }
 
-/// Set the rate limit per second.
+/// Set the rate of new available tokens per second.
 ///
-/// The value is not only used for the rate at which tokens are added to the bucket, but
-/// also for the maximum number of available tokens. To set a different value fo the
-/// maximum number of available tokens, use the `burst_limit` function.
+/// Note that this is not the maximum number of requests that can be made in a single
+/// second, but the rate at which tokens are added to the bucket. Think of this as the
+/// steady state rate limit, while the `burst_limit` function sets the maximum number of
+/// available tokens (or the burst rate limit).
+///
+/// This value is also used as the default value for the `burst_limit` function.
+///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.per_second(10)
+/// ```
 ///
 pub fn per_second(
   limiter: RateLimiterBuilder(a, b, id),
@@ -87,6 +100,19 @@ pub fn per_second(
 }
 
 /// Set the rate limit per second, based on the identifier.
+///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.identifier(fn(request) { request.user_id })
+///   |> glimit.per_second_fn(fn(user_id) {
+///     db.get_rate_limit(user_id)
+///   })
+/// ```
 ///
 pub fn per_second_fn(
   limiter: RateLimiterBuilder(a, b, id),
@@ -100,6 +126,17 @@ pub fn per_second_fn(
 /// The maximum number of available tokens is the maximum number of requests that can be
 /// made in a single second. The default value is the same as the rate limit per second.
 ///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.per_second(10)
+///   |> glimit.burst_limit(100)
+/// ```
+///
 pub fn burst_limit(
   limiter: RateLimiterBuilder(a, b, id),
   burst_limit: Int,
@@ -108,6 +145,20 @@ pub fn burst_limit(
 }
 
 /// Set the maximum number of available tokens, based on the identifier.
+///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.identifier(fn(request) { request.user_id })
+///   |> glimit.per_second(10)
+///   |> glimit.burst_limit_fn(fn(user_id) {
+///     db.get_burst_limit(user_id)
+///   })
+/// ```
 ///
 pub fn burst_limit_fn(
   limiter: RateLimiterBuilder(a, b, id),
@@ -118,6 +169,17 @@ pub fn burst_limit_fn(
 
 /// Set the handler to be called when the rate limit is reached.
 ///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.per_second(10)
+///   |> glimit.on_limit_exceeded(fn(_request) { "Rate limit reached" })
+/// ```
+///
 pub fn on_limit_exceeded(
   limiter: RateLimiterBuilder(a, b, id),
   on_limit_exceeded: fn(a) -> b,
@@ -126,6 +188,16 @@ pub fn on_limit_exceeded(
 }
 
 /// Set the identifier function to be used to identify the rate limit.
+///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.identifier(fn(request) { request.ip })
+/// ```
 ///
 pub fn identifier(
   limiter: RateLimiterBuilder(a, b, id),
