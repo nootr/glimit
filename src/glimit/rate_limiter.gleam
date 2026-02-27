@@ -75,9 +75,9 @@ pub type Message {
   SetNow(now: Int)
 }
 
-fn handle_message(message: Message, state: State) -> actor.Next(Message, State) {
+fn handle_message(state: State, message: Message) -> actor.Next(State, Message) {
   case message {
-    Shutdown -> actor.Stop(process.Normal)
+    Shutdown -> actor.stop()
 
     Hit(client) -> {
       let state = refill_bucket(state)
@@ -116,8 +116,11 @@ pub fn new(
       last_update: None,
       now: None,
     )
-  actor.start(state, handle_message)
-  |> result.nil_error
+  actor.new(state)
+  |> actor.on_message(handle_message)
+  |> actor.start
+  |> result.map(fn(started) { started.data })
+  |> result.map_error(fn(_) { Nil })
 }
 
 /// Stop the rate limiter actor.
@@ -129,13 +132,13 @@ pub fn shutdown(rate_limiter: Subject(Message)) -> Nil {
 /// Mark a hit on the rate limiter actor.
 ///
 pub fn hit(rate_limiter: Subject(Message)) -> Result(Nil, Nil) {
-  actor.call(rate_limiter, Hit, 10)
+  actor.call(rate_limiter, waiting: 10, sending: Hit)
 }
 
 /// Returns True if the token bucket is full.
 ///
 pub fn has_full_bucket(rate_limiter: Subject(Message)) -> Bool {
-  actor.call(rate_limiter, HasFullBucket, 10)
+  actor.call(rate_limiter, waiting: 10, sending: HasFullBucket)
 }
 
 /// Set the current time for testing purposes.
