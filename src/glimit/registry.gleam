@@ -6,7 +6,6 @@ import gleam/erlang/process.{type Subject}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
-import gleam/otp/task
 import gleam/result
 import glimit/rate_limiter
 
@@ -63,9 +62,9 @@ fn handle_get_or_create(
 }
 
 fn handle_message(
-  message: Message(id),
   state: State(id),
-) -> actor.Next(Message(id), State(id)) {
+  message: Message(id),
+) -> actor.Next(State(id), Message(id)) {
   case message {
     GetOrCreate(identifier, client) -> {
       case handle_get_or_create(identifier, state) {
@@ -113,11 +112,14 @@ pub fn new(
       registry: dict.new(),
     )
   use registry <- result.try(
-    actor.start(state, handle_message)
-    |> result.nil_error,
+    actor.new(state)
+    |> actor.on_message(handle_message)
+    |> actor.start
+    |> result.map(fn(started) { started.data })
+    |> result.map_error(fn(_) { Nil }),
   )
 
-  task.async(fn() { sweep(registry, Some(10)) })
+  process.spawn(fn() { sweep(registry, Some(10)) })
 
   Ok(registry)
 }
@@ -128,7 +130,7 @@ pub fn get_or_create(
   registry: RateLimiterRegistryActor(id),
   identifier: id,
 ) -> Result(Subject(rate_limiter.Message), Nil) {
-  actor.call(registry, GetOrCreate(identifier, _), 10)
+  actor.call(registry, waiting: 10, sending: GetOrCreate(identifier, _))
 }
 
 /// Return a list of rate limiters.
@@ -136,7 +138,7 @@ pub fn get_or_create(
 pub fn get_all(
   registry: RateLimiterRegistryActor(id),
 ) -> List(#(id, Subject(rate_limiter.Message))) {
-  actor.call(registry, GetAll, 10)
+  actor.call(registry, waiting: 10, sending: GetAll)
 }
 
 /// Remove a rate limiter from the registry.
@@ -145,7 +147,7 @@ pub fn remove(
   registry: RateLimiterRegistryActor(id),
   identifier: id,
 ) -> Result(Nil, Nil) {
-  actor.call(registry, Remove(identifier, _), 10)
+  actor.call(registry, waiting: 10, sending: Remove(identifier, _))
   Ok(Nil)
 }
 
