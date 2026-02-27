@@ -1,4 +1,4 @@
-import gleam/bytes_builder
+import gleam/bytes_tree
 import gleam/erlang/process
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
@@ -12,10 +12,10 @@ import mist.{
 fn handle_request(req: Request(Connection)) -> Response(ResponseData) {
   let index =
     response.new(200)
-    |> response.set_body(mist.Bytes(bytes_builder.from_string("Hello, world!")))
+    |> response.set_body(mist.Bytes(bytes_tree.from_string("Hello, world!")))
   let not_found =
     response.new(404)
-    |> response.set_body(mist.Bytes(bytes_builder.from_string("Not found")))
+    |> response.set_body(mist.Bytes(bytes_tree.from_string("Not found")))
 
   case request.path_segments(req) {
     [] -> index
@@ -36,7 +36,7 @@ pub fn main() {
   let rate_limit_reached = fn(_req) {
     response.new(429)
     |> response.set_body(
-      mist.Bytes(bytes_builder.from_string("Too many requests")),
+      mist.Bytes(bytes_tree.from_string("Too many requests")),
     )
   }
 
@@ -52,7 +52,7 @@ pub fn main() {
     |> glimit.apply(limiter)
     |> mist.new
     |> mist.port(8000)
-    |> mist.start_http
+    |> mist.start
 
   process.sleep_forever()
 }
