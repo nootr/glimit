@@ -8,6 +8,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 
+## 0.4.0 - 2026-02-27
+
+### Breaking changes
+
+- Updated `gleam_otp` to 1.x and `gleam_erlang` to 1.x.
+- Updated minimum `gleam_stdlib` to 0.60.0.
+- Requires Gleam >= 1.14.0.
+
+### Changed
+
+- Migrated actor code to the new builder API (`actor.new` / `actor.on_message` / `actor.start`).
+- Replaced `gleam/otp/task` with `process.spawn`.
+- Updated CI to Gleam 1.14.0 and OTP 27.
+
+Thanks to [@tylerbutler](https://github.com/tylerbutler) for the contribution!
+
+
 ## 0.3.0 - 2024-09-09
 
 ### Breaking changes
