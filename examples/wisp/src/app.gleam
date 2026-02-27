@@ -2,7 +2,6 @@ import app/router
 import gleam/erlang/process
 import gleam/http/request
 import gleam/result
-import gleam/string_builder
 import glimit
 import mist
 import wisp.{type Request}
@@ -20,8 +19,7 @@ pub fn main() {
       |> result.unwrap("anonymous")
     })
     |> glimit.on_limit_exceeded(fn(_) {
-      let body = string_builder.from_string("<h1>Too many requests</h1>")
-      wisp.html_response(body, 429)
+      wisp.html_response("<h1>Too many requests</h1>", 429)
     })
 
   wisp.configure_logger()
@@ -37,7 +35,7 @@ pub fn main() {
     )
     |> mist.new
     |> mist.port(8000)
-    |> mist.start_http
+    |> mist.start
 
   process.sleep_forever()
 }
