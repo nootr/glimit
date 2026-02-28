@@ -8,6 +8,8 @@ import gleam/otp/actor
 import gleam/result
 import glimit/utils
 
+const call_timeout = 1000
+
 type State {
   State(
     /// The maximum number of tokens.
@@ -132,13 +134,13 @@ pub fn shutdown(rate_limiter: Subject(Message)) -> Nil {
 /// Mark a hit on the rate limiter actor.
 ///
 pub fn hit(rate_limiter: Subject(Message)) -> Result(Nil, Nil) {
-  actor.call(rate_limiter, waiting: 10, sending: Hit)
+  actor.call(rate_limiter, waiting: call_timeout, sending: Hit)
 }
 
 /// Returns True if the token bucket is full.
 ///
 pub fn has_full_bucket(rate_limiter: Subject(Message)) -> Bool {
-  actor.call(rate_limiter, waiting: 10, sending: HasFullBucket)
+  actor.call(rate_limiter, waiting: call_timeout, sending: HasFullBucket)
 }
 
 /// Set the current time for testing purposes.

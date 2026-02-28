@@ -9,6 +9,8 @@ import gleam/otp/actor
 import gleam/result
 import glimit/rate_limiter
 
+const call_timeout = 1000
+
 pub type RateLimiterRegistryActor(id) =
   Subject(Message(id))
 
@@ -25,6 +27,12 @@ type State(id) {
     /// The registry of rate limiters.
     ///
     registry: Dict(id, Subject(rate_limiter.Message)),
+    /// The interval in milliseconds between sweeps.
+    ///
+    sweep_interval_ms: Option(Int),
+    /// The actor's own subject for self-messaging.
+    ///
+    self_subject: Subject(Message(id)),
   )
 }
 
@@ -41,6 +49,12 @@ pub type Message(id) {
   /// Remove a rate limiter from the registry.
   ///
   Remove(identifier: id, reply_with: Subject(Nil))
+  /// Fire-and-forget sweep, used by send_after for periodic scheduling.
+  ///
+  Sweep
+  /// Synchronous sweep variant for tests.
+  ///
+  SweepSync(reply_with: Subject(Nil))
 }
 
 fn handle_get_or_create(
@@ -58,6 +72,71 @@ fn handle_get_or_create(
       ))
       Ok(rate_limiter)
     }
+  }
+}
+
+/// Like process.call but returns Result instead of panicking on timeout or
+/// callee death.
+///
+fn safe_call(
+  subject: Subject(message),
+  make_request: fn(Subject(reply)) -> message,
+  timeout: Int,
+) -> Result(reply, Nil) {
+  case process.subject_owner(subject) {
+    Error(_) -> Error(Nil)
+    Ok(callee) -> {
+      let reply_subject = process.new_subject()
+      let monitor = process.monitor(callee)
+      process.send(subject, make_request(reply_subject))
+
+      let result =
+        process.new_selector()
+        |> process.select_map(reply_subject, fn(reply) { Ok(reply) })
+        |> process.select_specific_monitor(monitor, fn(_down) { Error(Nil) })
+        |> process.selector_receive(within: timeout)
+
+      process.demonitor_process(monitor)
+
+      case result {
+        Ok(Ok(reply)) -> Ok(reply)
+        Ok(Error(Nil)) -> Error(Nil)
+        Error(Nil) -> Error(Nil)
+      }
+    }
+  }
+}
+
+/// Atomically sweep full buckets from the registry within the actor.
+///
+fn do_sweep(state: State(id)) -> State(id) {
+  let #(to_remove, to_keep) =
+    state.registry
+    |> dict.to_list
+    |> list.partition(fn(pair) {
+      let #(_, rl) = pair
+      case safe_call(rl, rate_limiter.HasFullBucket, call_timeout) {
+        Ok(is_full) -> is_full
+        // Remove unresponsive or dead rate limiters
+        Error(_) -> True
+      }
+    })
+
+  list.each(to_remove, fn(pair) {
+    let #(_, rl) = pair
+    rate_limiter.shutdown(rl)
+  })
+
+  State(..state, registry: dict.from_list(to_keep))
+}
+
+fn schedule_sweep(state: State(id)) -> Nil {
+  case state.sweep_interval_ms {
+    Some(ms) -> {
+      let _ = process.send_after(state.self_subject, ms, Sweep)
+      Nil
+    }
+    None -> Nil
   }
 }
 
@@ -96,6 +175,18 @@ fn handle_message(
       actor.send(client, Nil)
       actor.continue(state)
     }
+
+    Sweep -> {
+      let state = do_sweep(state)
+      schedule_sweep(state)
+      actor.continue(state)
+    }
+
+    SweepSync(client) -> {
+      let state = do_sweep(state)
+      actor.send(client, Nil)
+      actor.continue(state)
+    }
   }
 }
 
@@ -105,23 +196,29 @@ pub fn new(
   per_second: fn(id) -> Int,
   burst_limit: fn(id) -> Int,
 ) -> Result(RateLimiterRegistryActor(id), Nil) {
-  let state =
-    State(
-      max_token_count: burst_limit,
-      token_rate: per_second,
-      registry: dict.new(),
+  let sweep_interval_ms = Some(10_000)
+
+  actor.new_with_initialiser(call_timeout, fn(self_subject) {
+    let state =
+      State(
+        max_token_count: burst_limit,
+        token_rate: per_second,
+        registry: dict.new(),
+        sweep_interval_ms: sweep_interval_ms,
+        self_subject: self_subject,
+      )
+
+    schedule_sweep(state)
+
+    Ok(
+      actor.initialised(state)
+      |> actor.returning(self_subject),
     )
-  use registry <- result.try(
-    actor.new(state)
-    |> actor.on_message(handle_message)
-    |> actor.start
-    |> result.map(fn(started) { started.data })
-    |> result.map_error(fn(_) { Nil }),
-  )
-
-  process.spawn(fn() { sweep(registry, Some(10)) })
-
-  Ok(registry)
+  })
+  |> actor.on_message(handle_message)
+  |> actor.start
+  |> result.map(fn(started) { started.data })
+  |> result.map_error(fn(_) { Nil })
 }
 
 /// Get the rate limiter for the given id or create a new one if missing.
@@ -130,7 +227,10 @@ pub fn get_or_create(
   registry: RateLimiterRegistryActor(id),
   identifier: id,
 ) -> Result(Subject(rate_limiter.Message), Nil) {
-  actor.call(registry, waiting: 10, sending: GetOrCreate(identifier, _))
+  actor.call(registry, waiting: call_timeout, sending: GetOrCreate(
+    identifier,
+    _,
+  ))
 }
 
 /// Return a list of rate limiters.
@@ -138,7 +238,7 @@ pub fn get_or_create(
 pub fn get_all(
   registry: RateLimiterRegistryActor(id),
 ) -> List(#(id, Subject(rate_limiter.Message))) {
-  actor.call(registry, waiting: 10, sending: GetAll)
+  actor.call(registry, waiting: call_timeout, sending: GetAll)
 }
 
 /// Remove a rate limiter from the registry.
@@ -147,42 +247,15 @@ pub fn remove(
   registry: RateLimiterRegistryActor(id),
   identifier: id,
 ) -> Result(Nil, Nil) {
-  actor.call(registry, waiting: 10, sending: Remove(identifier, _))
+  actor.call(registry, waiting: call_timeout, sending: Remove(identifier, _))
   Ok(Nil)
 }
 
 /// Remove full buckets from the registry.
 ///
-/// It does so in four steps:
-///
-/// 1. Fetch a list of all rate limiters.
-/// 2. Check which rate limiters have a full bucket.
-/// 3. Remove the rate limiters with a full bucket from the registry.
-/// 4. Send a shutdown message to the rate limiters with a full bucket.
-///
-/// This function is repeated periodically.
-///
-pub fn sweep(registry: RateLimiterRegistryActor(id), interval_secs: Option(Int)) {
-  case interval_secs {
-    Some(i) -> process.sleep(i * 1000)
-    None -> Nil
-  }
-
-  get_all(registry)
-  |> list.filter(fn(pair) {
-    let #(_, rate_limiter) = pair
-    rate_limiter
-    |> rate_limiter.has_full_bucket
-  })
-  |> list.map(fn(pair) {
-    let #(identifier, rate_limiter) = pair
-    let _ = remove(registry, identifier)
-    rate_limiter |> rate_limiter.shutdown
-    identifier
-  })
-
-  case interval_secs {
-    Some(_) -> sweep(registry, interval_secs)
-    None -> Nil
-  }
+pub fn sweep(
+  registry: RateLimiterRegistryActor(id),
+  _interval_secs: Option(Int),
+) {
+  actor.call(registry, waiting: call_timeout, sending: SweepSync)
 }
