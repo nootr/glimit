@@ -280,7 +280,8 @@ pub fn apply_built(
           Error(Nil) -> limiter.on_limit_exceeded(input)
         }
       }
-      Error(_) -> panic as "Failed to get rate limiter"
+      // Fail open — if rate limiting infrastructure fails, let requests through
+      Error(_) -> func(input)
     }
   }
 }
