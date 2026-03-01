@@ -141,19 +141,15 @@ pub fn shutdown(rate_limiter: Subject(Message)) -> Nil {
 /// Mark a hit on the rate limiter actor.
 ///
 pub fn hit(rate_limiter: Subject(Message)) -> Result(Nil, Nil) {
-  case utils.safe_call(rate_limiter, Hit, call_timeout) {
-    Ok(result) -> result
-    Error(_) -> Error(Nil)
-  }
+  utils.safe_call(rate_limiter, Hit, call_timeout)
+  |> result.flatten
 }
 
 /// Returns True if the token bucket is full.
 ///
 pub fn has_full_bucket(rate_limiter: Subject(Message)) -> Bool {
-  case utils.safe_call(rate_limiter, HasFullBucket, call_timeout) {
-    Ok(is_full) -> is_full
-    Error(_) -> False
-  }
+  utils.safe_call(rate_limiter, HasFullBucket, call_timeout)
+  |> result.unwrap(False)
 }
 
 /// Set the current time for testing purposes.

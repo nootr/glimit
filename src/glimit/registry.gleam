@@ -100,11 +100,9 @@ fn do_sweep(state: State(id)) -> State(id) {
     |> dict.to_list
     |> list.partition(fn(pair) {
       let #(_, rl) = pair
-      case utils.safe_call(rl, rate_limiter.HasFullBucket, sweep_call_timeout) {
-        Ok(is_full) -> is_full
-        // Remove unresponsive or dead rate limiters
-        Error(_) -> True
-      }
+      // Remove unresponsive or dead rate limiters (unwrap to True)
+      utils.safe_call(rl, rate_limiter.HasFullBucket, sweep_call_timeout)
+      |> result.unwrap(True)
     })
 
   list.each(to_remove, fn(pair) {
@@ -216,10 +214,8 @@ pub fn get_or_create(
   registry: RateLimiterRegistryActor(id),
   identifier: id,
 ) -> Result(Subject(rate_limiter.Message), Nil) {
-  case utils.safe_call(registry, GetOrCreate(identifier, _), call_timeout) {
-    Ok(result) -> result
-    Error(_) -> Error(Nil)
-  }
+  utils.safe_call(registry, GetOrCreate(identifier, _), call_timeout)
+  |> result.flatten
 }
 
 /// Return a list of rate limiters.
@@ -227,10 +223,8 @@ pub fn get_or_create(
 pub fn get_all(
   registry: RateLimiterRegistryActor(id),
 ) -> List(#(id, Subject(rate_limiter.Message))) {
-  case utils.safe_call(registry, GetAll, call_timeout) {
-    Ok(list) -> list
-    Error(_) -> []
-  }
+  utils.safe_call(registry, GetAll, call_timeout)
+  |> result.unwrap([])
 }
 
 /// Remove a rate limiter from the registry.
@@ -239,10 +233,7 @@ pub fn remove(
   registry: RateLimiterRegistryActor(id),
   identifier: id,
 ) -> Result(Nil, Nil) {
-  case utils.safe_call(registry, Remove(identifier, _), call_timeout) {
-    Ok(_) -> Ok(Nil)
-    Error(_) -> Error(Nil)
-  }
+  utils.safe_call(registry, Remove(identifier, _), call_timeout)
 }
 
 /// Remove full buckets from the registry.
@@ -251,8 +242,6 @@ pub fn sweep(
   registry: RateLimiterRegistryActor(id),
   _interval_secs: Option(Int),
 ) {
-  case utils.safe_call(registry, SweepSync, call_timeout) {
-    Ok(_) -> Nil
-    Error(_) -> Nil
-  }
+  let _ = utils.safe_call(registry, SweepSync, call_timeout)
+  Nil
 }
