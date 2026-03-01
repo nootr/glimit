@@ -39,7 +39,7 @@ fn refill_bucket(state: State) -> State {
   }
   let time_diff = case state.last_update {
     None -> 0
-    Some(last_update) -> now - last_update
+    Some(last_update) -> int.max(0, now - last_update)
   }
   let token_count =
     state.token_count + state.token_rate * time_diff
@@ -83,9 +83,9 @@ fn handle_message(state: State, message: Message) -> actor.Next(State, Message) 
 
     Hit(client) -> {
       let state = refill_bucket(state)
-      let #(result, state) = case state.token_count {
-        0 -> #(Error(Nil), state)
-        _ -> #(Ok(Nil), remove_token(state))
+      let #(result, state) = case state.token_count > 0 {
+        False -> #(Error(Nil), state)
+        True -> #(Ok(Nil), remove_token(state))
       }
 
       actor.send(client, result)
@@ -106,23 +106,30 @@ fn handle_message(state: State, message: Message) -> actor.Next(State, Message) 
 
 /// Create a new rate limiter actor.
 ///
+/// Returns Error(Nil) if max_token_count or token_rate are not positive.
+///
 pub fn new(
   max_token_count: Int,
   token_rate: Int,
 ) -> Result(Subject(Message), Nil) {
-  let state =
-    State(
-      max_token_count: max_token_count,
-      token_rate: token_rate,
-      token_count: max_token_count,
-      last_update: None,
-      now: None,
-    )
-  actor.new(state)
-  |> actor.on_message(handle_message)
-  |> actor.start
-  |> result.map(fn(started) { started.data })
-  |> result.map_error(fn(_) { Nil })
+  case max_token_count > 0 && token_rate > 0 {
+    False -> Error(Nil)
+    True -> {
+      let state =
+        State(
+          max_token_count: max_token_count,
+          token_rate: token_rate,
+          token_count: max_token_count,
+          last_update: None,
+          now: None,
+        )
+      actor.new(state)
+      |> actor.on_message(handle_message)
+      |> actor.start
+      |> result.map(fn(started) { started.data })
+      |> result.map_error(fn(_) { Nil })
+    }
+  }
 }
 
 /// Stop the rate limiter actor.
@@ -134,13 +141,19 @@ pub fn shutdown(rate_limiter: Subject(Message)) -> Nil {
 /// Mark a hit on the rate limiter actor.
 ///
 pub fn hit(rate_limiter: Subject(Message)) -> Result(Nil, Nil) {
-  actor.call(rate_limiter, waiting: call_timeout, sending: Hit)
+  case utils.safe_call(rate_limiter, Hit, call_timeout) {
+    Ok(result) -> result
+    Error(_) -> Error(Nil)
+  }
 }
 
 /// Returns True if the token bucket is full.
 ///
 pub fn has_full_bucket(rate_limiter: Subject(Message)) -> Bool {
-  actor.call(rate_limiter, waiting: call_timeout, sending: HasFullBucket)
+  case utils.safe_call(rate_limiter, HasFullBucket, call_timeout) {
+    Ok(is_full) -> is_full
+    Error(_) -> False
+  }
 }
 
 /// Set the current time for testing purposes.

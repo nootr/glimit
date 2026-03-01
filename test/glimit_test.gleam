@@ -1,3 +1,4 @@
+import gleam/erlang/process
 import gleam/list
 import gleam/option.{None}
 import gleeunit
@@ -403,6 +404,36 @@ pub fn integration_sweep_then_reuse_test() {
 
   // "user_a" was not full (0 tokens) → not swept → still rate-limited
   func("user_a") |> should.equal("Stop!")
+}
+
+pub fn dead_rate_limiter_does_not_crash_caller_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let func =
+    fn(_) { "OK" }
+    |> glimit.apply_built(limiter)
+
+  // Use the limiter normally
+  func("user") |> should.equal("OK")
+
+  // Kill the rate limiter behind the scenes
+  let assert Ok(rl) =
+    limiter.rate_limiter_registry |> registry.get_or_create("user")
+  let assert Ok(pid) = process.subject_owner(rl)
+  let monitor = process.monitor(pid)
+  rate_limiter.shutdown(rl)
+  let _ =
+    process.new_selector()
+    |> process.select_specific_monitor(monitor, fn(down) { down })
+    |> process.selector_receive(within: 1000)
+
+  // Should not panic — get_or_create replaces dead subject
+  func("user") |> should.equal("OK")
 }
 
 fn ignore(_value: a) -> Nil {

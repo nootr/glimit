@@ -179,3 +179,52 @@ pub fn sweep_get_or_create_after_sweep_test() {
   let assert Ok(Nil) = new_remove |> rate_limiter.hit
   let assert Ok(Nil) = new_remove |> rate_limiter.hit
 }
+
+pub fn hit_dead_rate_limiter_returns_error_test() {
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = registry |> registry.get_or_create("dead")
+
+  let assert Ok(pid) = process.subject_owner(rl)
+  let monitor = process.monitor(pid)
+  rate_limiter.shutdown(rl)
+  let _ =
+    process.new_selector()
+    |> process.select_specific_monitor(monitor, fn(down) { down })
+    |> process.selector_receive(within: 1000)
+
+  // hit returns Error instead of panicking
+  rl |> rate_limiter.hit |> should.be_error
+}
+
+pub fn remove_shuts_down_actor_test() {
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = registry |> registry.get_or_create("removed")
+
+  let assert Ok(pid) = process.subject_owner(rl)
+  let monitor = process.monitor(pid)
+  let assert Ok(_) = registry |> registry.remove("removed")
+
+  // Wait for confirmed death via monitor
+  let _ =
+    process.new_selector()
+    |> process.select_specific_monitor(monitor, fn(down) { down })
+    |> process.selector_receive(within: 1000)
+
+  process.is_alive(pid) |> should.be_false
+}
+
+pub fn invalid_per_second_returns_error_test() {
+  let result = rate_limiter.new(2, 0)
+  result |> should.be_error
+
+  let result = rate_limiter.new(2, -1)
+  result |> should.be_error
+}
+
+pub fn invalid_burst_limit_returns_error_test() {
+  let result = rate_limiter.new(0, 2)
+  result |> should.be_error
+
+  let result = rate_limiter.new(-1, 2)
+  result |> should.be_error
+}
