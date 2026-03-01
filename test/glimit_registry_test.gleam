@@ -93,6 +93,28 @@ pub fn sweep_mixed_buckets_test() {
   rl_b |> should.equal(new_b)
 }
 
+pub fn get_or_create_replaces_dead_subject_test() {
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = registry |> registry.get_or_create("dead")
+
+  // Shut down the rate limiter and wait for confirmed death
+  let assert Ok(pid) = process.subject_owner(rl)
+  let monitor = process.monitor(pid)
+  rate_limiter.shutdown(rl)
+  let _ =
+    process.new_selector()
+    |> process.select_specific_monitor(monitor, fn(down) { down })
+    |> process.selector_receive(within: 1000)
+
+  // get_or_create detects the dead process and returns a fresh replacement
+  let assert Ok(new_rl) = registry |> registry.get_or_create("dead")
+  rl |> should.not_equal(new_rl)
+
+  // The replacement is fully functional
+  let assert Ok(Nil) = new_rl |> rate_limiter.hit
+  let assert Ok(Nil) = new_rl |> rate_limiter.hit
+}
+
 pub fn sweep_dead_rate_limiter_test() {
   let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   let assert Ok(rl) = registry |> registry.get_or_create("dead")

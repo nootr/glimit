@@ -62,8 +62,22 @@ fn handle_get_or_create(
   state: State(id),
 ) -> Result(Subject(rate_limiter.Message), Nil) {
   case state.registry |> dict.get(identifier) {
-    Ok(rate_limiter) -> {
-      Ok(rate_limiter)
+    Ok(existing) -> {
+      let is_alive = case process.subject_owner(existing) {
+        Ok(pid) -> process.is_alive(pid)
+        Error(_) -> False
+      }
+      case is_alive {
+        True -> Ok(existing)
+        // Dead process — create a replacement
+        False -> {
+          use rl <- result.try(rate_limiter.new(
+            state.max_token_count(identifier),
+            state.token_rate(identifier),
+          ))
+          Ok(rl)
+        }
+      }
     }
     Error(_) -> {
       use rate_limiter <- result.try(rate_limiter.new(
