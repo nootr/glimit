@@ -2,6 +2,7 @@
 ////
 
 import gleam/erlang/process.{type Subject}
+import gleam/result
 
 @external(erlang, "os", "timestamp")
 fn now_erlang() -> #(Int, Int, Int)
@@ -35,11 +36,8 @@ pub fn safe_call(
 
       process.demonitor_process(monitor)
 
-      case result {
-        Ok(Ok(reply)) -> Ok(reply)
-        Ok(Error(Nil)) -> Error(Nil)
-        Error(Nil) -> Error(Nil)
-      }
+      result
+      |> result.flatten
     }
   }
 }
