@@ -440,25 +440,25 @@ pub fn sub_second_remainder_preservation_test() {
   list.repeat(Nil, 10) |> list.each(fn(_) { rl |> rate_limiter.hit |> ignore })
   rl |> rate_limiter.hit |> should.be_error
 
-  // 400ms: 2 * 400 / 1000 = 0 tokens — still rate limited
+  // 400ms: tc = 0.0 + 2.0 * 400 / 1000 = 0.8 < 1.0 — still rate limited
   rl |> rate_limiter.set_now(400)
   rl |> rate_limiter.hit |> should.be_error
 
-  // 500ms: 2 * 500 / 1000 = 1 token — should succeed
+  // 500ms: tc = 0.8 + 2.0 * 100 / 1000 = 1.0 >= 1.0 — succeeds
   rl |> rate_limiter.set_now(500)
   rl |> rate_limiter.hit |> should.equal(Ok(Nil))
   rl |> rate_limiter.hit |> should.be_error
 
-  // 900ms: only 400ms since last token at 500ms — 0 tokens
+  // 900ms: tc = 0.0 + 2.0 * 400 / 1000 = 0.8 < 1.0
   rl |> rate_limiter.set_now(900)
   rl |> rate_limiter.hit |> should.be_error
 
-  // 1000ms: 500ms since last token — 1 more token
+  // 1000ms: tc = 0.8 + 2.0 * 100 / 1000 = 1.0 >= 1.0
   rl |> rate_limiter.set_now(1000)
   rl |> rate_limiter.hit |> should.equal(Ok(Nil))
   rl |> rate_limiter.hit |> should.be_error
 
-  // 2500ms: 1500ms since last token at 1000ms — 3 tokens
+  // 2500ms: tc = 0.0 + 2.0 * 1500 / 1000 = 3.0 — 3 tokens
   rl |> rate_limiter.set_now(2500)
   rl |> rate_limiter.hit |> should.equal(Ok(Nil))
   rl |> rate_limiter.hit |> should.equal(Ok(Nil))
@@ -467,10 +467,9 @@ pub fn sub_second_remainder_preservation_test() {
 }
 
 pub fn sub_second_remainder_non_divisible_rate_test() {
-  // 3 tokens/sec, burst 5 — one token every ~333ms
-  // Exercises double integer division rounding: tokens_to_add * 1000 / 3
-  // produces a 1ms gap per token (333ms vs 333.3ms), which must not
-  // accumulate into lost tokens over many refill cycles.
+  // 3 tokens/sec, burst 5 — one token every ~333.3ms.
+  // Fractional tokens accumulate naturally via float arithmetic,
+  // so non-divisible rates don't lose precision across refill cycles.
   let assert Ok(rl) = rate_limiter.new(5, 3)
 
   // Drain all 5 tokens at t=0
@@ -478,28 +477,25 @@ pub fn sub_second_remainder_non_divisible_rate_test() {
   list.repeat(Nil, 5) |> list.each(fn(_) { rl |> rate_limiter.hit |> ignore })
   rl |> rate_limiter.hit |> should.be_error
 
-  // 333ms: 3 * 333 / 1000 = 0 tokens (999 / 1000 = 0)
+  // 333ms: tc = 0.0 + 3.0 * 333 / 1000 = 0.999 < 1.0
   rl |> rate_limiter.set_now(333)
   rl |> rate_limiter.hit |> should.be_error
 
-  // 334ms: 3 * 334 / 1000 = 1 token (1002 / 1000 = 1)
-  // last_update advances by 1 * 1000 / 3 = 333ms → last_update = 333
+  // 334ms: tc = 0.999 + 3.0 * 1 / 1000 = 1.002 >= 1.0 — succeeds
   rl |> rate_limiter.set_now(334)
   rl |> rate_limiter.hit |> should.equal(Ok(Nil))
   rl |> rate_limiter.hit |> should.be_error
 
-  // 666ms: time_diff = 666 - 333 = 333ms, 3 * 333 / 1000 = 0
+  // 666ms: tc = 0.002 + 3.0 * 332 / 1000 = 0.998 < 1.0
   rl |> rate_limiter.set_now(666)
   rl |> rate_limiter.hit |> should.be_error
 
-  // 667ms: time_diff = 667 - 333 = 334ms, 3 * 334 / 1000 = 1
-  // last_update = 333 + 333 = 666
+  // 667ms: tc = 0.998 + 3.0 * 1 / 1000 = 1.001 >= 1.0 — succeeds
   rl |> rate_limiter.set_now(667)
   rl |> rate_limiter.hit |> should.equal(Ok(Nil))
   rl |> rate_limiter.hit |> should.be_error
 
-  // 3000ms: time_diff = 3000 - 666 = 2334ms, 3 * 2334 / 1000 = 7
-  // Capped at burst limit 5
+  // 3000ms: tc = 0.001 + 3.0 * 2333 / 1000 = 7.0, capped at burst limit 5
   rl |> rate_limiter.set_now(3000)
   rl |> rate_limiter.hit |> should.equal(Ok(Nil))
   rl |> rate_limiter.hit |> should.equal(Ok(Nil))

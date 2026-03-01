@@ -2,6 +2,7 @@
 ////
 
 import gleam/erlang/process.{type Subject}
+import gleam/float
 import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
@@ -20,7 +21,7 @@ type State {
     token_rate: Int,
     /// The number of tokens available.
     ///
-    token_count: Int,
+    token_count: Float,
     /// Epoch timestamp (milliseconds) of the last time the rate limiter was updated.
     ///
     last_update: Option(Int),
@@ -41,22 +42,14 @@ fn refill_bucket(state: State) -> State {
     None -> 0
     Some(last_update) -> int.max(0, now - last_update)
   }
-  let tokens_to_add = state.token_rate * time_diff / 1000
+  let tokens_to_add =
+    int.to_float(state.token_rate) *. int.to_float(time_diff) /. 1000.0
   let token_count =
-    { state.token_count + tokens_to_add }
-    |> int.min(state.max_token_count)
-    |> int.max(0)
-  // Advance last_update by consumed time rather than jumping to `now`.
-  // This preserves the sub-second remainder that was insufficient for a
-  // full token, so it accumulates into the next refill cycle.
-  let last_update = case tokens_to_add > 0 {
-    True ->
-      Some(
-        option.unwrap(state.last_update, now)
-        + tokens_to_add
-        * 1000
-        / state.token_rate,
-      )
+    { state.token_count +. tokens_to_add }
+    |> float.min(int.to_float(state.max_token_count))
+    |> float.max(0.0)
+  let last_update = case time_diff > 0 {
+    True -> Some(now)
     False ->
       case state.last_update {
         None -> Some(now)
@@ -70,7 +63,7 @@ fn refill_bucket(state: State) -> State {
 /// Updates the state to remove a token.
 ///
 fn remove_token(state: State) -> State {
-  State(..state, token_count: state.token_count - 1)
+  State(..state, token_count: state.token_count -. 1.0)
 }
 
 /// The message type for the rate limiter actor.
@@ -101,7 +94,7 @@ fn handle_message(state: State, message: Message) -> actor.Next(State, Message) 
 
     Hit(client) -> {
       let state = refill_bucket(state)
-      let #(result, state) = case state.token_count > 0 {
+      let #(result, state) = case state.token_count >=. 1.0 {
         False -> #(Error(Nil), state)
         True -> #(Ok(Nil), remove_token(state))
       }
@@ -112,7 +105,7 @@ fn handle_message(state: State, message: Message) -> actor.Next(State, Message) 
 
     HasFullBucket(client) -> {
       let state = refill_bucket(state)
-      let result = state.token_count == state.max_token_count
+      let result = state.token_count >=. int.to_float(state.max_token_count)
 
       actor.send(client, result)
       actor.continue(state)
@@ -137,7 +130,7 @@ pub fn new(
         State(
           max_token_count: max_token_count,
           token_rate: token_rate,
-          token_count: max_token_count,
+          token_count: int.to_float(max_token_count),
           last_update: None,
           now: None,
         )
