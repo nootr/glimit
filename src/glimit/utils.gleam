@@ -6,10 +6,10 @@ import gleam/erlang/process.{type Subject}
 @external(erlang, "os", "timestamp")
 fn now_erlang() -> #(Int, Int, Int)
 
-/// Get the current time in epoch seconds.
+/// Get the current time in epoch milliseconds.
 pub fn now() -> Int {
-  let #(megaseconds, seconds, _) = now_erlang()
-  megaseconds * 1_000_000 + seconds
+  let #(megaseconds, seconds, microseconds) = now_erlang()
+  megaseconds * 1_000_000_000 + seconds * 1000 + microseconds / 1000
 }
 
 /// Like process.call but returns Result instead of panicking on timeout or

@@ -21,10 +21,10 @@ type State {
     /// The number of tokens available.
     ///
     token_count: Int,
-    /// Epoch timestamp of the last time the rate limiter was updated.
+    /// Epoch timestamp (milliseconds) of the last time the rate limiter was updated.
     ///
     last_update: Option(Int),
-    /// Timestamp that overrides the current time for testing purposes.
+    /// Timestamp (milliseconds) that overrides the current time for testing purposes.
     ///
     now: Option(Int),
   )
@@ -41,12 +41,30 @@ fn refill_bucket(state: State) -> State {
     None -> 0
     Some(last_update) -> int.max(0, now - last_update)
   }
+  let tokens_to_add = state.token_rate * time_diff / 1000
   let token_count =
-    state.token_count + state.token_rate * time_diff
+    { state.token_count + tokens_to_add }
     |> int.min(state.max_token_count)
     |> int.max(0)
+  // Advance last_update by consumed time rather than jumping to `now`.
+  // This preserves the sub-second remainder that was insufficient for a
+  // full token, so it accumulates into the next refill cycle.
+  let last_update = case tokens_to_add > 0 {
+    True ->
+      Some(
+        option.unwrap(state.last_update, now)
+        + tokens_to_add
+        * 1000
+        / state.token_rate,
+      )
+    False ->
+      case state.last_update {
+        None -> Some(now)
+        Some(_) -> state.last_update
+      }
+  }
 
-  State(..state, token_count: token_count, last_update: Some(now))
+  State(..state, token_count: token_count, last_update: last_update)
 }
 
 /// Updates the state to remove a token.
@@ -153,6 +171,7 @@ pub fn has_full_bucket(rate_limiter: Subject(Message)) -> Bool {
 }
 
 /// Set the current time for testing purposes.
+/// The `now` value must be in epoch milliseconds.
 ///
 pub fn set_now(rate_limiter: Subject(Message), now: Int) -> Nil {
   actor.send(rate_limiter, SetNow(now))

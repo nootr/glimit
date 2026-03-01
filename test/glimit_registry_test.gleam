@@ -54,7 +54,7 @@ pub fn sweep_after_long_time_test() {
   let _ = rate_limiter |> rate_limiter.hit
   let _ = rate_limiter |> rate_limiter.hit
   let _ = rate_limiter |> rate_limiter.hit
-  rate_limiter |> rate_limiter.set_now(1000)
+  rate_limiter |> rate_limiter.set_now(1_000_000)
 
   registry |> registry.sweep
 

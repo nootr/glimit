@@ -70,25 +70,25 @@ pub fn burst_limit_test() {
   func(Nil) |> should.equal("Stop!")
   func(Nil) |> should.equal("Stop!")
 
-  rate_limiter |> rate_limiter.set_now(1)
+  rate_limiter |> rate_limiter.set_now(1000)
   func(Nil) |> should.equal("OK")
   func(Nil) |> should.equal("Stop!")
   func(Nil) |> should.equal("Stop!")
 
-  rate_limiter |> rate_limiter.set_now(3)
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("Stop!")
-  func(Nil) |> should.equal("Stop!")
-
-  rate_limiter |> rate_limiter.set_now(6)
-  func(Nil) |> should.equal("OK")
+  rate_limiter |> rate_limiter.set_now(3000)
   func(Nil) |> should.equal("OK")
   func(Nil) |> should.equal("OK")
   func(Nil) |> should.equal("Stop!")
   func(Nil) |> should.equal("Stop!")
 
-  rate_limiter |> rate_limiter.set_now(13)
+  rate_limiter |> rate_limiter.set_now(6000)
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("Stop!")
+  func(Nil) |> should.equal("Stop!")
+
+  rate_limiter |> rate_limiter.set_now(13_000)
   func(Nil) |> should.equal("OK")
   func(Nil) |> should.equal("OK")
   func(Nil) |> should.equal("OK")
@@ -151,7 +151,7 @@ pub fn dynamic_per_second_static_burst_limit_test() {
   func("id") |> should.equal("Stop!")
   func("id") |> should.equal("Stop!")
 
-  rate_limiter |> rate_limiter.set_now(1)
+  rate_limiter |> rate_limiter.set_now(1000)
   func("id") |> should.equal("OK")
   func("id") |> should.equal("OK")
   func("id") |> should.equal("Stop!")
@@ -168,7 +168,7 @@ pub fn dynamic_per_second_static_burst_limit_test() {
   func("other") |> should.equal("Stop!")
   func("other") |> should.equal("Stop!")
 
-  rate_limiter |> rate_limiter.set_now(1)
+  rate_limiter |> rate_limiter.set_now(1000)
   func("other") |> should.equal("OK")
   func("other") |> should.equal("Stop!")
   func("other") |> should.equal("Stop!")
@@ -203,7 +203,7 @@ pub fn static_per_second_dynamic_burst_limit_test() {
   func("id") |> should.equal("Stop!")
   func("id") |> should.equal("Stop!")
 
-  rate_limiter |> rate_limiter.set_now(1)
+  rate_limiter |> rate_limiter.set_now(1000)
   func("id") |> should.equal("OK")
   func("id") |> should.equal("Stop!")
   func("id") |> should.equal("Stop!")
@@ -218,7 +218,7 @@ pub fn static_per_second_dynamic_burst_limit_test() {
   func("other") |> should.equal("Stop!")
   func("other") |> should.equal("Stop!")
 
-  rate_limiter |> rate_limiter.set_now(1)
+  rate_limiter |> rate_limiter.set_now(1000)
   func("other") |> should.equal("OK")
   func("other") |> should.equal("Stop!")
   func("other") |> should.equal("Stop!")
@@ -259,7 +259,7 @@ pub fn dynamic_per_second_dynamic_burst_limit_test() {
   func("id") |> should.equal("Stop!")
   func("id") |> should.equal("Stop!")
 
-  rate_limiter |> rate_limiter.set_now(1)
+  rate_limiter |> rate_limiter.set_now(1000)
   func("id") |> should.equal("OK")
   func("id") |> should.equal("OK")
   func("id") |> should.equal("Stop!")
@@ -276,7 +276,7 @@ pub fn dynamic_per_second_dynamic_burst_limit_test() {
   func("other") |> should.equal("Stop!")
   func("other") |> should.equal("Stop!")
 
-  rate_limiter |> rate_limiter.set_now(1)
+  rate_limiter |> rate_limiter.set_now(1000)
   func("other") |> should.equal("OK")
   func("other") |> should.equal("Stop!")
   func("other") |> should.equal("Stop!")
@@ -433,6 +433,84 @@ pub fn dead_rate_limiter_does_not_crash_caller_test() {
 
   // Should not panic — get_or_create replaces dead subject
   func("user") |> should.equal("OK")
+}
+
+pub fn sub_second_remainder_preservation_test() {
+  // 2 tokens/sec, burst 10 — one token every 500ms
+  let assert Ok(rl) = rate_limiter.new(10, 2)
+
+  // Consume all 10 tokens at t=0
+  rl |> rate_limiter.set_now(0)
+  list.repeat(Nil, 10) |> list.each(fn(_) { rl |> rate_limiter.hit |> ignore })
+  rl |> rate_limiter.hit |> should.be_error
+
+  // 400ms: 2 * 400 / 1000 = 0 tokens — still rate limited
+  rl |> rate_limiter.set_now(400)
+  rl |> rate_limiter.hit |> should.be_error
+
+  // 500ms: 2 * 500 / 1000 = 1 token — should succeed
+  rl |> rate_limiter.set_now(500)
+  rl |> rate_limiter.hit |> should.equal(Ok(Nil))
+  rl |> rate_limiter.hit |> should.be_error
+
+  // 900ms: only 400ms since last token at 500ms — 0 tokens
+  rl |> rate_limiter.set_now(900)
+  rl |> rate_limiter.hit |> should.be_error
+
+  // 1000ms: 500ms since last token — 1 more token
+  rl |> rate_limiter.set_now(1000)
+  rl |> rate_limiter.hit |> should.equal(Ok(Nil))
+  rl |> rate_limiter.hit |> should.be_error
+
+  // 2500ms: 1500ms since last token at 1000ms — 3 tokens
+  rl |> rate_limiter.set_now(2500)
+  rl |> rate_limiter.hit |> should.equal(Ok(Nil))
+  rl |> rate_limiter.hit |> should.equal(Ok(Nil))
+  rl |> rate_limiter.hit |> should.equal(Ok(Nil))
+  rl |> rate_limiter.hit |> should.be_error
+}
+
+pub fn sub_second_remainder_non_divisible_rate_test() {
+  // 3 tokens/sec, burst 5 — one token every ~333ms
+  // Exercises double integer division rounding: tokens_to_add * 1000 / 3
+  // produces a 1ms gap per token (333ms vs 333.3ms), which must not
+  // accumulate into lost tokens over many refill cycles.
+  let assert Ok(rl) = rate_limiter.new(5, 3)
+
+  // Drain all 5 tokens at t=0
+  rl |> rate_limiter.set_now(0)
+  list.repeat(Nil, 5) |> list.each(fn(_) { rl |> rate_limiter.hit |> ignore })
+  rl |> rate_limiter.hit |> should.be_error
+
+  // 333ms: 3 * 333 / 1000 = 0 tokens (999 / 1000 = 0)
+  rl |> rate_limiter.set_now(333)
+  rl |> rate_limiter.hit |> should.be_error
+
+  // 334ms: 3 * 334 / 1000 = 1 token (1002 / 1000 = 1)
+  // last_update advances by 1 * 1000 / 3 = 333ms → last_update = 333
+  rl |> rate_limiter.set_now(334)
+  rl |> rate_limiter.hit |> should.equal(Ok(Nil))
+  rl |> rate_limiter.hit |> should.be_error
+
+  // 666ms: time_diff = 666 - 333 = 333ms, 3 * 333 / 1000 = 0
+  rl |> rate_limiter.set_now(666)
+  rl |> rate_limiter.hit |> should.be_error
+
+  // 667ms: time_diff = 667 - 333 = 334ms, 3 * 334 / 1000 = 1
+  // last_update = 333 + 333 = 666
+  rl |> rate_limiter.set_now(667)
+  rl |> rate_limiter.hit |> should.equal(Ok(Nil))
+  rl |> rate_limiter.hit |> should.be_error
+
+  // 3000ms: time_diff = 3000 - 666 = 2334ms, 3 * 2334 / 1000 = 7
+  // Capped at burst limit 5
+  rl |> rate_limiter.set_now(3000)
+  rl |> rate_limiter.hit |> should.equal(Ok(Nil))
+  rl |> rate_limiter.hit |> should.equal(Ok(Nil))
+  rl |> rate_limiter.hit |> should.equal(Ok(Nil))
+  rl |> rate_limiter.hit |> should.equal(Ok(Nil))
+  rl |> rate_limiter.hit |> should.equal(Ok(Nil))
+  rl |> rate_limiter.hit |> should.be_error
 }
 
 fn ignore(_value: a) -> Nil {
