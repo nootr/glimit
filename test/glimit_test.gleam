@@ -513,6 +513,61 @@ pub fn sub_second_remainder_non_divisible_rate_test() {
   rl |> rate_limiter.hit |> should.be_error
 }
 
+pub fn build_missing_per_second_test() {
+  glimit.new()
+  |> glimit.build
+  |> should.equal(Error("`per_second` rate limit is required"))
+}
+
+pub fn build_missing_identifier_test() {
+  glimit.new()
+  |> glimit.per_second(1)
+  |> glimit.build
+  |> should.equal(Error("`identifier` function is required"))
+}
+
+pub fn build_missing_on_limit_exceeded_test() {
+  glimit.new()
+  |> glimit.per_second(1)
+  |> glimit.identifier(fn(_) { "id" })
+  |> glimit.build
+  |> should.equal(Error("`on_limit_exceeded` function is required"))
+}
+
+pub fn builder_overwrite_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(999)
+    |> glimit.per_second(1)
+    |> glimit.burst_limit(999)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(_) { "wrong" })
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "wrong" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let func =
+    fn(_) { "OK" }
+    |> glimit.apply_built(limiter)
+
+  let assert Ok(rl) =
+    limiter.rate_limiter_registry
+    |> registry.get_or_create("id")
+
+  rl |> rate_limiter.set_now(0)
+  // burst_limit=2: two hits succeed, third is limited
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("OK")
+  // on_limit_exceeded returns "Stop!" (not "wrong")
+  func(Nil) |> should.equal("Stop!")
+
+  // Advance 1 second — per_second=1 so only 1 token refilled (not 999)
+  rl |> rate_limiter.set_now(1000)
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("Stop!")
+}
+
 fn ignore(_value: a) -> Nil {
   Nil
 }

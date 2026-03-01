@@ -1,4 +1,6 @@
 import gleam/erlang/process
+import gleam/list
+import gleam/string
 import gleeunit/should
 import glimit/rate_limiter
 import glimit/registry
@@ -226,4 +228,50 @@ pub fn invalid_burst_limit_returns_error_test() {
 
   let result = rate_limiter.new(-1, 2)
   result |> should.be_error
+}
+
+pub fn get_all_test() {
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
+  // Empty registry
+  registry |> registry.get_all |> should.equal([])
+  // After creating entries
+  let assert Ok(_) = registry |> registry.get_or_create("a")
+  let assert Ok(_) = registry |> registry.get_or_create("b")
+  let all = registry |> registry.get_all
+  list.length(all) |> should.equal(2)
+  let keys = list.map(all, fn(pair) { pair.0 })
+  keys |> list.sort(string.compare) |> should.equal(["a", "b"])
+}
+
+pub fn remove_nonexistent_test() {
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
+  // Should not crash — returns Ok(Nil) for missing key
+  registry |> registry.remove("nonexistent") |> should.equal(Ok(Nil))
+}
+
+pub fn has_full_bucket_dead_actor_test() {
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = registry |> registry.get_or_create("dead")
+
+  // Kill the rate limiter and wait for confirmed death
+  let assert Ok(pid) = process.subject_owner(rl)
+  let monitor = process.monitor(pid)
+  rate_limiter.shutdown(rl)
+  let _ =
+    process.new_selector()
+    |> process.select_specific_monitor(monitor, fn(down) { down })
+    |> process.selector_receive(within: 1000)
+
+  // Should return False (fail-open default) instead of crashing
+  rl |> rate_limiter.has_full_bucket |> should.be_false
+}
+
+pub fn set_now_backwards_test() {
+  let assert Ok(rl) = rate_limiter.new(2, 1)
+  rl |> rate_limiter.set_now(1000)
+  let _ = rl |> rate_limiter.hit
+  // Go backwards — time_diff clamped to 0, no tokens added
+  rl |> rate_limiter.set_now(500)
+  rl |> rate_limiter.hit |> should.equal(Ok(Nil))
+  rl |> rate_limiter.hit |> should.be_error
 }
