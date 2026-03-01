@@ -238,10 +238,7 @@ pub fn remove(
 
 /// Remove full buckets from the registry.
 ///
-pub fn sweep(
-  registry: RateLimiterRegistryActor(id),
-  _interval_secs: Option(Int),
-) {
+pub fn sweep(registry: RateLimiterRegistryActor(id)) {
   let _ = utils.safe_call(registry, SweepSync, call_timeout)
   Nil
 }

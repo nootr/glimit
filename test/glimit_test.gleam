@@ -1,6 +1,5 @@
 import gleam/erlang/process
 import gleam/list
-import gleam/option.{None}
 import gleeunit
 import gleeunit/should
 import glimit
@@ -303,7 +302,7 @@ pub fn sweep_preserves_active_limiters_test() {
   let assert Ok(_) =
     limiter.rate_limiter_registry |> registry.get_or_create("user_b")
 
-  registry.sweep(limiter.rate_limiter_registry, None)
+  registry.sweep(limiter.rate_limiter_registry)
 
   // "user_a" was active → kept, still has 1 token left
   func("user_a") |> should.equal("OK")
@@ -349,7 +348,7 @@ pub fn integration_many_identifiers_test() {
       #(id, rl)
     })
 
-  registry.sweep(limiter.rate_limiter_registry, None)
+  registry.sweep(limiter.rate_limiter_registry)
 
   // Get actors after sweep
   let after =
@@ -395,7 +394,7 @@ pub fn integration_sweep_then_reuse_test() {
   let assert Ok(_) =
     limiter.rate_limiter_registry |> registry.get_or_create("user_b")
 
-  registry.sweep(limiter.rate_limiter_registry, None)
+  registry.sweep(limiter.rate_limiter_registry)
 
   // "user_b" was full → swept → fresh limiter
   func("user_b") |> should.equal("OK")
