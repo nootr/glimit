@@ -339,7 +339,6 @@ pub fn integration_many_identifiers_test() {
     |> list.each(fn(_) { func(id) |> ignore })
   })
 
-  // Get actors before sweep
   let before =
     ids
     |> list.map(fn(id) {
@@ -350,7 +349,6 @@ pub fn integration_many_identifiers_test() {
 
   registry.sweep(limiter.rate_limiter_registry)
 
-  // Get actors after sweep
   let after =
     ids
     |> list.map(fn(id) {
@@ -417,10 +415,8 @@ pub fn dead_rate_limiter_does_not_crash_caller_test() {
     fn(_) { "OK" }
     |> glimit.apply_built(limiter)
 
-  // Use the limiter normally
   func("user") |> should.equal("OK")
 
-  // Kill the rate limiter behind the scenes
   let assert Ok(rl) =
     limiter.rate_limiter_registry |> registry.get_or_create("user")
   let assert Ok(pid) = process.subject_owner(rl)

@@ -25,7 +25,6 @@ pub fn safe_call_timeout_test() {
     })
     |> actor.start
   let subject = started.data
-  // safe_call should timeout and return Error
   utils.safe_call(subject, Ping, 50)
   |> should.be_error
 }

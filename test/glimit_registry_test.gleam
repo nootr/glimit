@@ -98,7 +98,6 @@ pub fn get_or_create_replaces_dead_subject_test() {
   let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   let assert Ok(rl) = registry |> registry.get_or_create("dead")
 
-  // Shut down the rate limiter and wait for confirmed death
   let assert Ok(pid) = process.subject_owner(rl)
   let monitor = process.monitor(pid)
   rate_limiter.shutdown(rl)
@@ -120,7 +119,6 @@ pub fn sweep_dead_rate_limiter_test() {
   let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   let assert Ok(rl) = registry |> registry.get_or_create("dead")
 
-  // Shut down the rate limiter process and wait for confirmed death
   let assert Ok(pid) = process.subject_owner(rl)
   let monitor = process.monitor(pid)
   rate_limiter.shutdown(rl)
@@ -193,7 +191,6 @@ pub fn hit_dead_rate_limiter_returns_error_test() {
     |> process.select_specific_monitor(monitor, fn(down) { down })
     |> process.selector_receive(within: 1000)
 
-  // hit returns Error instead of panicking
   rl |> rate_limiter.hit |> should.be_error
 }
 
@@ -205,7 +202,6 @@ pub fn remove_shuts_down_actor_test() {
   let monitor = process.monitor(pid)
   let assert Ok(_) = registry |> registry.remove("removed")
 
-  // Wait for confirmed death via monitor
   let _ =
     process.new_selector()
     |> process.select_specific_monitor(monitor, fn(down) { down })
@@ -232,9 +228,8 @@ pub fn invalid_burst_limit_returns_error_test() {
 
 pub fn get_all_test() {
   let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
-  // Empty registry
   registry |> registry.get_all |> should.equal([])
-  // After creating entries
+
   let assert Ok(_) = registry |> registry.get_or_create("a")
   let assert Ok(_) = registry |> registry.get_or_create("b")
   let all = registry |> registry.get_all
@@ -245,7 +240,6 @@ pub fn get_all_test() {
 
 pub fn remove_nonexistent_test() {
   let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
-  // Should not crash — returns Ok(Nil) for missing key
   registry |> registry.remove("nonexistent") |> should.equal(Ok(Nil))
 }
 
@@ -253,7 +247,6 @@ pub fn has_full_bucket_dead_actor_test() {
   let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   let assert Ok(rl) = registry |> registry.get_or_create("dead")
 
-  // Kill the rate limiter and wait for confirmed death
   let assert Ok(pid) = process.subject_owner(rl)
   let monitor = process.monitor(pid)
   rate_limiter.shutdown(rl)
@@ -262,7 +255,7 @@ pub fn has_full_bucket_dead_actor_test() {
     |> process.select_specific_monitor(monitor, fn(down) { down })
     |> process.selector_receive(within: 1000)
 
-  // Should return False (fail-open default) instead of crashing
+  // Fail-open: dead actor returns False rather than crashing
   rl |> rate_limiter.has_full_bucket |> should.be_false
 }
 
