@@ -8,11 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 
-## 0.5.0 - 2026-03-02
+## 1.0.0 - 2026-03-02
 
 ### Added
 
 - `apply2`, `apply3`, `apply4` to rate-limit multi-argument functions directly.
+- Performance section in README documenting sweep batching, memory, and fail-open behavior.
 
 
 ## 0.4.1 - 2026-03-02
