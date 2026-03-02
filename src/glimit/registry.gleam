@@ -264,7 +264,8 @@ pub fn remove(
   utils.safe_call(registry, Remove(identifier, _), call_timeout)
 }
 
-/// Remove full buckets from the registry.
+/// Remove full buckets from the registry synchronously.
+/// Intended for testing — production uses the periodic `Sweep` timer.
 ///
 pub fn sweep(registry: RateLimiterRegistryActor(id)) -> Result(Nil, Nil) {
   utils.safe_call(registry, SweepSync, call_timeout)
