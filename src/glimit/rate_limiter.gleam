@@ -43,7 +43,7 @@ fn refill_bucket(state: State) -> State {
     Some(last_update) -> int.max(0, now - last_update)
   }
   let tokens_to_add =
-    int.to_float(state.token_rate) *. int.to_float(time_diff) /. 1000.0
+    int.to_float(state.token_rate * time_diff) /. 1000.0
   let token_count =
     { state.token_count +. tokens_to_add }
     |> float.min(int.to_float(state.max_token_count))
