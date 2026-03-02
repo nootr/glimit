@@ -277,7 +277,8 @@ pub fn apply_built(
       Ok(rate_limiter) -> {
         case rate_limiter |> rate_limiter.hit {
           Ok(Nil) -> func(input)
-          Error(Nil) -> limiter.on_limit_exceeded(input)
+          Error(rate_limiter.RateLimited) -> limiter.on_limit_exceeded(input)
+          Error(rate_limiter.Unavailable) -> func(input)
         }
       }
       // Fail open — if rate limiting infrastructure fails, let requests through

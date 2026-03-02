@@ -1,5 +1,6 @@
 import gleam/erlang/process
-import gleam/option.{None}
+import gleam/list
+import gleam/string
 import gleeunit/should
 import glimit/rate_limiter
 import glimit/registry
@@ -26,7 +27,7 @@ pub fn sweep_full_bucket_test() {
   let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   let assert Ok(rate_limiter) = registry |> registry.get_or_create("🚀")
 
-  registry |> registry.sweep(None)
+  let assert Ok(Nil) = registry |> registry.sweep
 
   let assert Ok(new_rate_limiter) = registry |> registry.get_or_create("🚀")
 
@@ -39,7 +40,7 @@ pub fn sweep_not_full_bucket_test() {
   let assert Ok(rate_limiter) = registry |> registry.get_or_create("🚀")
 
   let _ = rate_limiter |> rate_limiter.hit
-  registry |> registry.sweep(None)
+  let assert Ok(Nil) = registry |> registry.sweep
 
   let assert Ok(new_rate_limiter) = registry |> registry.get_or_create("🚀")
 
@@ -55,9 +56,9 @@ pub fn sweep_after_long_time_test() {
   let _ = rate_limiter |> rate_limiter.hit
   let _ = rate_limiter |> rate_limiter.hit
   let _ = rate_limiter |> rate_limiter.hit
-  rate_limiter |> rate_limiter.set_now(1000)
+  rate_limiter |> rate_limiter.set_now(1_000_000)
 
-  registry |> registry.sweep(None)
+  let assert Ok(Nil) = registry |> registry.sweep
 
   let assert Ok(new_rate_limiter) = registry |> registry.get_or_create("🚀")
 
@@ -68,7 +69,7 @@ pub fn sweep_after_long_time_test() {
 pub fn sweep_empty_registry_test() {
   let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   // Sweep with no entries should not crash
-  registry |> registry.sweep(None)
+  let assert Ok(Nil) = registry |> registry.sweep
 }
 
 pub fn sweep_mixed_buckets_test() {
@@ -80,7 +81,7 @@ pub fn sweep_mixed_buckets_test() {
   // Hit "b" so it's not full
   let _ = rl_b |> rate_limiter.hit
 
-  registry |> registry.sweep(None)
+  let assert Ok(Nil) = registry |> registry.sweep
 
   let assert Ok(new_a) = registry |> registry.get_or_create("a")
   let assert Ok(new_b) = registry |> registry.get_or_create("b")
@@ -97,7 +98,6 @@ pub fn get_or_create_replaces_dead_subject_test() {
   let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   let assert Ok(rl) = registry |> registry.get_or_create("dead")
 
-  // Shut down the rate limiter and wait for confirmed death
   let assert Ok(pid) = process.subject_owner(rl)
   let monitor = process.monitor(pid)
   rate_limiter.shutdown(rl)
@@ -119,7 +119,6 @@ pub fn sweep_dead_rate_limiter_test() {
   let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   let assert Ok(rl) = registry |> registry.get_or_create("dead")
 
-  // Shut down the rate limiter process and wait for confirmed death
   let assert Ok(pid) = process.subject_owner(rl)
   let monitor = process.monitor(pid)
   rate_limiter.shutdown(rl)
@@ -129,7 +128,7 @@ pub fn sweep_dead_rate_limiter_test() {
     |> process.selector_receive(within: 1000)
 
   // Sweep should remove the dead entry via safe_call error path
-  registry |> registry.sweep(None)
+  let assert Ok(Nil) = registry |> registry.sweep
 
   let assert Ok(new_rl) = registry |> registry.get_or_create("dead")
   rl |> should.not_equal(new_rl)
@@ -146,7 +145,7 @@ pub fn sweep_all_active_test() {
   let _ = rl_b |> rate_limiter.hit
   let _ = rl_c |> rate_limiter.hit
 
-  registry |> registry.sweep(None)
+  let assert Ok(Nil) = registry |> registry.sweep
 
   let assert Ok(new_a) = registry |> registry.get_or_create("a")
   let assert Ok(new_b) = registry |> registry.get_or_create("b")
@@ -166,7 +165,7 @@ pub fn sweep_get_or_create_after_sweep_test() {
   // Hit "keep" so it's active
   let _ = rl_keep |> rate_limiter.hit
 
-  registry |> registry.sweep(None)
+  let assert Ok(Nil) = registry |> registry.sweep
 
   // "remove" was full → swept
   let assert Ok(new_remove) = registry |> registry.get_or_create("remove")
@@ -178,4 +177,94 @@ pub fn sweep_get_or_create_after_sweep_test() {
   // New "remove" limiter has fresh tokens → hit should succeed
   let assert Ok(Nil) = new_remove |> rate_limiter.hit
   let assert Ok(Nil) = new_remove |> rate_limiter.hit
+}
+
+pub fn hit_dead_rate_limiter_returns_error_test() {
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = registry |> registry.get_or_create("dead")
+
+  let assert Ok(pid) = process.subject_owner(rl)
+  let monitor = process.monitor(pid)
+  rate_limiter.shutdown(rl)
+  let _ =
+    process.new_selector()
+    |> process.select_specific_monitor(monitor, fn(down) { down })
+    |> process.selector_receive(within: 1000)
+
+  rl |> rate_limiter.hit |> should.equal(Error(rate_limiter.Unavailable))
+}
+
+pub fn remove_shuts_down_actor_test() {
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = registry |> registry.get_or_create("removed")
+
+  let assert Ok(pid) = process.subject_owner(rl)
+  let monitor = process.monitor(pid)
+  let assert Ok(_) = registry |> registry.remove("removed")
+
+  let _ =
+    process.new_selector()
+    |> process.select_specific_monitor(monitor, fn(down) { down })
+    |> process.selector_receive(within: 1000)
+
+  process.is_alive(pid) |> should.be_false
+}
+
+pub fn invalid_per_second_returns_error_test() {
+  let result = rate_limiter.new(2, 0)
+  result |> should.be_error
+
+  let result = rate_limiter.new(2, -1)
+  result |> should.be_error
+}
+
+pub fn invalid_burst_limit_returns_error_test() {
+  let result = rate_limiter.new(0, 2)
+  result |> should.be_error
+
+  let result = rate_limiter.new(-1, 2)
+  result |> should.be_error
+}
+
+pub fn get_all_test() {
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
+  registry |> registry.get_all |> should.equal([])
+
+  let assert Ok(_) = registry |> registry.get_or_create("a")
+  let assert Ok(_) = registry |> registry.get_or_create("b")
+  let all = registry |> registry.get_all
+  list.length(all) |> should.equal(2)
+  let keys = list.map(all, fn(pair) { pair.0 })
+  keys |> list.sort(string.compare) |> should.equal(["a", "b"])
+}
+
+pub fn remove_nonexistent_test() {
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
+  registry |> registry.remove("nonexistent") |> should.equal(Ok(Nil))
+}
+
+pub fn has_full_bucket_dead_actor_test() {
+  let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = registry |> registry.get_or_create("dead")
+
+  let assert Ok(pid) = process.subject_owner(rl)
+  let monitor = process.monitor(pid)
+  rate_limiter.shutdown(rl)
+  let _ =
+    process.new_selector()
+    |> process.select_specific_monitor(monitor, fn(down) { down })
+    |> process.selector_receive(within: 1000)
+
+  // Fail-open: dead actor returns False rather than crashing
+  rl |> rate_limiter.has_full_bucket |> should.be_false
+}
+
+pub fn set_now_backwards_test() {
+  let assert Ok(rl) = rate_limiter.new(2, 1)
+  rl |> rate_limiter.set_now(1000)
+  let _ = rl |> rate_limiter.hit
+  // Go backwards — time_diff clamped to 0, no tokens added
+  rl |> rate_limiter.set_now(500)
+  rl |> rate_limiter.hit |> should.equal(Ok(Nil))
+  rl |> rate_limiter.hit |> should.be_error
 }
