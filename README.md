@@ -6,8 +6,6 @@
 
 A simple, framework-agnostic, in-memory rate limiter for Gleam. 💫
 
-> ⚠️  This library is still in development, use at your own risk.
-
 
 ## Features
 
@@ -49,7 +47,14 @@ More practical examples can be found in the `examples/` directory, such as Wisp 
 
 While the in-memory rate limiter is simple and easy to use, it does have an important constraint: it is scoped to the BEAM VM cluster it runs in. This means that if your application is running across multiple BEAM VM clusters, the rate limiter will not be shared between them.
 
-There are plans to add support for a centralized data store using Redis in the future.
+
+## Performance
+
+Each rate limiter registry is a single OTP actor. Operations like `get_or_create`, `get_all`, and `remove` are serialized through it, so the registry itself is the throughput bottleneck — individual rate limiter actors run concurrently.
+
+* **Memory**: One actor per unique identifier. Idle identifiers (full token buckets) are automatically swept every 10 seconds and shut down.
+* **Sweep**: Entries are processed in batches of 50 with a 10ms per-call timeout. Between batches, other registry messages (hits, lookups) can interleave, so sweeps don't block the registry for large numbers of identifiers.
+* **Fail-open**: If a rate limiter actor dies or times out, the request is allowed through rather than rejected.
 
 
 ## Documentation

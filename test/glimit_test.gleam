@@ -560,6 +560,53 @@ pub fn builder_overwrite_test() {
   func(Nil) |> should.equal("Stop!")
 }
 
+pub fn apply2_test() {
+  let limiter =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.identifier(fn(args: #(String, Int)) { args.0 })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+
+  let func =
+    fn(name: String, _count: Int) { "OK: " <> name }
+    |> glimit.apply2(limiter)
+
+  func("alice", 1) |> should.equal("OK: alice")
+  func("alice", 2) |> should.equal("OK: alice")
+  func("alice", 3) |> should.equal("Stop!")
+  func("bob", 1) |> should.equal("OK: bob")
+}
+
+pub fn apply3_test() {
+  let limiter =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.identifier(fn(args: #(String, Int, Bool)) { args.0 })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+
+  let func =
+    fn(name: String, _count: Int, _flag: Bool) { "OK: " <> name }
+    |> glimit.apply3(limiter)
+
+  func("alice", 1, True) |> should.equal("OK: alice")
+  func("alice", 2, False) |> should.equal("Stop!")
+}
+
+pub fn apply4_test() {
+  let limiter =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.identifier(fn(args: #(String, Int, Bool, String)) { args.0 })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+
+  let func =
+    fn(name: String, _a: Int, _b: Bool, _c: String) { "OK: " <> name }
+    |> glimit.apply4(limiter)
+
+  func("alice", 1, True, "x") |> should.equal("OK: alice")
+  func("alice", 2, False, "y") |> should.equal("Stop!")
+}
+
 fn ignore(_value: a) -> Nil {
   Nil
 }

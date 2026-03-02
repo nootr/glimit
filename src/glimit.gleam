@@ -310,6 +310,22 @@ pub fn apply_built(
 ///
 /// The config's `identifier` and `on_limit_exceeded` receive a `#(a, b)` tuple.
 ///
+/// # Example
+///
+/// ```gleam
+/// let limiter =
+///   glimit.new()
+///   |> glimit.per_second(10)
+///   |> glimit.identifier(fn(args: #(String, String)) { args.0 })
+///   |> glimit.on_limit_exceeded(fn(_) { "Rate limited" })
+///
+/// let limited =
+///   handle
+///   |> glimit.apply2(limiter)
+///
+/// limited("user_123", "upload")
+/// ```
+///
 pub fn apply2(
   func: fn(a, b) -> c,
   config: RateLimiterBuilder(#(a, b), c, id),
@@ -324,6 +340,22 @@ pub fn apply2(
 ///
 /// The config's `identifier` and `on_limit_exceeded` receive a `#(a, b, c)` tuple.
 ///
+/// # Example
+///
+/// ```gleam
+/// let limiter =
+///   glimit.new()
+///   |> glimit.per_second(10)
+///   |> glimit.identifier(fn(args: #(String, String, Int)) { args.0 })
+///   |> glimit.on_limit_exceeded(fn(_) { "Rate limited" })
+///
+/// let limited =
+///   handle
+///   |> glimit.apply3(limiter)
+///
+/// limited("user_123", "upload", 42)
+/// ```
+///
 pub fn apply3(
   func: fn(a, b, c) -> d,
   config: RateLimiterBuilder(#(a, b, c), d, id),
@@ -337,6 +369,22 @@ pub fn apply3(
 /// Apply the rate limiter to a 4-argument function.
 ///
 /// The config's `identifier` and `on_limit_exceeded` receive a `#(a, b, c, d)` tuple.
+///
+/// # Example
+///
+/// ```gleam
+/// let limiter =
+///   glimit.new()
+///   |> glimit.per_second(10)
+///   |> glimit.identifier(fn(args: #(String, String, Int, Bool)) { args.0 })
+///   |> glimit.on_limit_exceeded(fn(_) { "Rate limited" })
+///
+/// let limited =
+///   handle
+///   |> glimit.apply4(limiter)
+///
+/// limited("user_123", "upload", 42, True)
+/// ```
 ///
 pub fn apply4(
   func: fn(a, b, c, d) -> e,
