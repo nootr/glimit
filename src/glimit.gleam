@@ -35,6 +35,25 @@
 ////   |> glimit.apply(limiter)
 //// ```
 ////
+//// # Multi-argument functions
+////
+//// `apply` wraps a single-argument function `fn(a) -> b`. To rate-limit a
+//// function with multiple arguments, use `apply2`, `apply3`, or `apply4`:
+////
+//// ```gleam
+//// let limiter =
+////   glimit.new()
+////   |> glimit.per_second(10)
+////   |> glimit.identifier(fn(args: #(String, String)) { args.0 })
+////   |> glimit.on_limit_exceeded(fn(_args) { too_many_requests() })
+////
+//// let limited_handle =
+////   handle
+////   |> glimit.apply2(limiter)
+////
+//// limited_handle("user_123", "upload")
+//// ```
+////
 
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -285,4 +304,46 @@ pub fn apply_built(
       Error(_) -> func(input)
     }
   }
+}
+
+/// Apply the rate limiter to a 2-argument function.
+///
+/// The config's `identifier` and `on_limit_exceeded` receive a `#(a, b)` tuple.
+///
+pub fn apply2(
+  func: fn(a, b) -> c,
+  config: RateLimiterBuilder(#(a, b), c, id),
+) -> fn(a, b) -> c {
+  let wrapped =
+    fn(args: #(a, b)) -> c { func(args.0, args.1) }
+    |> apply(config)
+  fn(a: a, b: b) -> c { wrapped(#(a, b)) }
+}
+
+/// Apply the rate limiter to a 3-argument function.
+///
+/// The config's `identifier` and `on_limit_exceeded` receive a `#(a, b, c)` tuple.
+///
+pub fn apply3(
+  func: fn(a, b, c) -> d,
+  config: RateLimiterBuilder(#(a, b, c), d, id),
+) -> fn(a, b, c) -> d {
+  let wrapped =
+    fn(args: #(a, b, c)) -> d { func(args.0, args.1, args.2) }
+    |> apply(config)
+  fn(a: a, b: b, c: c) -> d { wrapped(#(a, b, c)) }
+}
+
+/// Apply the rate limiter to a 4-argument function.
+///
+/// The config's `identifier` and `on_limit_exceeded` receive a `#(a, b, c, d)` tuple.
+///
+pub fn apply4(
+  func: fn(a, b, c, d) -> e,
+  config: RateLimiterBuilder(#(a, b, c, d), e, id),
+) -> fn(a, b, c, d) -> e {
+  let wrapped =
+    fn(args: #(a, b, c, d)) -> e { func(args.0, args.1, args.2, args.3) }
+    |> apply(config)
+  fn(a: a, b: b, c: c, d: d) -> e { wrapped(#(a, b, c, d)) }
 }
