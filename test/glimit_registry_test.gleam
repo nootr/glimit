@@ -27,7 +27,7 @@ pub fn sweep_full_bucket_test() {
   let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   let assert Ok(rate_limiter) = registry |> registry.get_or_create("🚀")
 
-  registry |> registry.sweep
+  let assert Ok(Nil) = registry |> registry.sweep
 
   let assert Ok(new_rate_limiter) = registry |> registry.get_or_create("🚀")
 
@@ -40,7 +40,7 @@ pub fn sweep_not_full_bucket_test() {
   let assert Ok(rate_limiter) = registry |> registry.get_or_create("🚀")
 
   let _ = rate_limiter |> rate_limiter.hit
-  registry |> registry.sweep
+  let assert Ok(Nil) = registry |> registry.sweep
 
   let assert Ok(new_rate_limiter) = registry |> registry.get_or_create("🚀")
 
@@ -58,7 +58,7 @@ pub fn sweep_after_long_time_test() {
   let _ = rate_limiter |> rate_limiter.hit
   rate_limiter |> rate_limiter.set_now(1_000_000)
 
-  registry |> registry.sweep
+  let assert Ok(Nil) = registry |> registry.sweep
 
   let assert Ok(new_rate_limiter) = registry |> registry.get_or_create("🚀")
 
@@ -69,7 +69,7 @@ pub fn sweep_after_long_time_test() {
 pub fn sweep_empty_registry_test() {
   let assert Ok(registry) = registry.new(fn(_) { 2 }, fn(_) { 2 })
   // Sweep with no entries should not crash
-  registry |> registry.sweep
+  let assert Ok(Nil) = registry |> registry.sweep
 }
 
 pub fn sweep_mixed_buckets_test() {
@@ -81,7 +81,7 @@ pub fn sweep_mixed_buckets_test() {
   // Hit "b" so it's not full
   let _ = rl_b |> rate_limiter.hit
 
-  registry |> registry.sweep
+  let assert Ok(Nil) = registry |> registry.sweep
 
   let assert Ok(new_a) = registry |> registry.get_or_create("a")
   let assert Ok(new_b) = registry |> registry.get_or_create("b")
@@ -128,7 +128,7 @@ pub fn sweep_dead_rate_limiter_test() {
     |> process.selector_receive(within: 1000)
 
   // Sweep should remove the dead entry via safe_call error path
-  registry |> registry.sweep
+  let assert Ok(Nil) = registry |> registry.sweep
 
   let assert Ok(new_rl) = registry |> registry.get_or_create("dead")
   rl |> should.not_equal(new_rl)
@@ -145,7 +145,7 @@ pub fn sweep_all_active_test() {
   let _ = rl_b |> rate_limiter.hit
   let _ = rl_c |> rate_limiter.hit
 
-  registry |> registry.sweep
+  let assert Ok(Nil) = registry |> registry.sweep
 
   let assert Ok(new_a) = registry |> registry.get_or_create("a")
   let assert Ok(new_b) = registry |> registry.get_or_create("b")
@@ -165,7 +165,7 @@ pub fn sweep_get_or_create_after_sweep_test() {
   // Hit "keep" so it's active
   let _ = rl_keep |> rate_limiter.hit
 
-  registry |> registry.sweep
+  let assert Ok(Nil) = registry |> registry.sweep
 
   // "remove" was full → swept
   let assert Ok(new_remove) = registry |> registry.get_or_create("remove")
