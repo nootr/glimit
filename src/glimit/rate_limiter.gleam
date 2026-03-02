@@ -88,6 +88,15 @@ pub type Message {
   SetNow(now: Int)
 }
 
+/// Error type returned by `hit`.
+///
+pub type HitError {
+  /// The rate limit has been exceeded.
+  RateLimited
+  /// The rate limiter actor is unavailable (e.g. it has stopped).
+  Unavailable
+}
+
 fn handle_message(state: State, message: Message) -> actor.Next(State, Message) {
   case message {
     Shutdown -> actor.stop()
@@ -151,9 +160,12 @@ pub fn shutdown(rate_limiter: Subject(Message)) -> Nil {
 
 /// Mark a hit on the rate limiter actor.
 ///
-pub fn hit(rate_limiter: Subject(Message)) -> Result(Nil, Nil) {
-  utils.safe_call(rate_limiter, Hit, call_timeout)
-  |> result.flatten
+pub fn hit(rate_limiter: Subject(Message)) -> Result(Nil, HitError) {
+  case utils.safe_call(rate_limiter, Hit, call_timeout) {
+    Ok(Ok(Nil)) -> Ok(Nil)
+    Ok(Error(Nil)) -> Error(RateLimited)
+    Error(Nil) -> Error(Unavailable)
+  }
 }
 
 /// Returns True if the token bucket is full.

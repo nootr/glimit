@@ -191,7 +191,7 @@ pub fn hit_dead_rate_limiter_returns_error_test() {
     |> process.select_specific_monitor(monitor, fn(down) { down })
     |> process.selector_receive(within: 1000)
 
-  rl |> rate_limiter.hit |> should.be_error
+  rl |> rate_limiter.hit |> should.equal(Error(rate_limiter.Unavailable))
 }
 
 pub fn remove_shuts_down_actor_test() {

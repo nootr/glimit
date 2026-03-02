@@ -36,7 +36,6 @@
 //// ```
 ////
 
-import gleam/erlang/process
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import glimit/rate_limiter
@@ -278,20 +277,8 @@ pub fn apply_built(
       Ok(rl) -> {
         case rl |> rate_limiter.hit {
           Ok(Nil) -> func(input)
-          Error(Nil) -> {
-            // Distinguish "rate limited" from "dead actor" — fail open on death.
-            // This is a narrow-window safety net: get_or_create already replaces
-            // dead actors, so this only triggers if the actor dies between
-            // get_or_create returning and hit being called.
-            let is_alive = case process.subject_owner(rl) {
-              Ok(pid) -> process.is_alive(pid)
-              Error(_) -> False
-            }
-            case is_alive {
-              True -> limiter.on_limit_exceeded(input)
-              False -> func(input)
-            }
-          }
+          Error(rate_limiter.RateLimited) -> limiter.on_limit_exceeded(input)
+          Error(rate_limiter.Unavailable) -> func(input)
         }
       }
       // Fail open — if rate limiting infrastructure fails, let requests through
