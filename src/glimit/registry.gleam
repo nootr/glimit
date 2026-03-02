@@ -12,7 +12,9 @@ import glimit/utils
 
 const call_timeout = 1000
 
-const sweep_call_timeout = 100
+const sweep_call_timeout = 10
+
+const sweep_batch_size = 50
 
 pub type RateLimiterRegistryActor(id) =
   Subject(Message(id))
@@ -58,6 +60,9 @@ pub type Message(id) {
   /// Synchronous sweep variant for tests.
   ///
   SweepSync(reply_with: Subject(Nil))
+  /// Internal: continue processing remaining entries of a chunked sweep.
+  ///
+  SweepBatch(entries: List(#(id, Subject(rate_limiter.Message))))
 }
 
 fn handle_get_or_create(
@@ -92,12 +97,15 @@ fn handle_get_or_create(
   }
 }
 
-/// Atomically sweep full buckets from the registry within the actor.
+/// Sweep a batch of entries, shutting down full/dead limiters and removing them
+/// from the registry.
 ///
-fn do_sweep(state: State(id)) -> State(id) {
-  let #(to_remove, to_keep) =
-    state.registry
-    |> dict.to_list
+fn do_sweep(
+  entries: List(#(id, Subject(rate_limiter.Message))),
+  state: State(id),
+) -> State(id) {
+  let #(to_remove, _to_keep) =
+    entries
     |> list.partition(fn(pair) {
       let #(_, rl) = pair
       // Remove unresponsive or dead rate limiters (unwrap to True)
@@ -110,7 +118,11 @@ fn do_sweep(state: State(id)) -> State(id) {
     rate_limiter.shutdown(rl)
   })
 
-  State(..state, registry: dict.from_list(to_keep))
+  let registry =
+    state.registry
+    |> dict.drop(list.map(to_remove, fn(pair) { pair.0 }))
+
+  State(..state, registry: registry)
 }
 
 fn schedule_sweep(state: State(id)) -> Nil {
@@ -164,15 +176,31 @@ fn handle_message(
     }
 
     Sweep -> {
-      let state = do_sweep(state)
-      schedule_sweep(state)
+      let entries = state.registry |> dict.to_list
+      actor.send(state.self_subject, SweepBatch(entries))
       actor.continue(state)
     }
 
     SweepSync(client) -> {
-      let state = do_sweep(state)
+      let entries = state.registry |> dict.to_list
+      let state = do_sweep(entries, state)
       actor.send(client, Nil)
       actor.continue(state)
+    }
+
+    SweepBatch(entries) -> {
+      let #(batch, remaining) = list.split(entries, sweep_batch_size)
+      let state = do_sweep(batch, state)
+      case remaining {
+        [] -> {
+          schedule_sweep(state)
+          actor.continue(state)
+        }
+        _ -> {
+          actor.send(state.self_subject, SweepBatch(remaining))
+          actor.continue(state)
+        }
+      }
     }
   }
 }
