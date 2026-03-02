@@ -8,6 +8,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 
+## 0.4.1 - 2026-03-02
+
+### Fixed
+
+- Eliminated all panic paths — public APIs (`hit`, `has_full_bucket`, `get_or_create`, `get_all`, `remove`, `sweep`) return `Result` instead of panicking on dead/timed-out actors.
+- `apply_built` now fails open when a rate limiter actor dies mid-request.
+- `remove` shuts down the actor process before deleting from the registry, preventing orphaned processes.
+- Fixed operator precedence bug where `token_count` could exceed `max_token_count` after refill.
+- Fixed sub-second remainder loss in `last_update` by advancing by consumed time rather than jumping to `now`.
+- `refill_bucket` clamps `time_diff` to non-negative to handle NTP clock adjustments.
+- `rate_limiter.new` validates `per_second > 0` and `burst_limit > 0`.
+
+### Changed
+
+- Sweep processes entries in batches of 50 with self-messaging between batches, allowing other registry operations to interleave.
+- Reduced sweep per-call timeout from 100ms to 10ms.
+- Switched internal time from seconds to milliseconds for smooth sub-second rate limiting.
+- Updated examples for mist 5.x and wisp 2.x.
+
+
 ## 0.4.0 - 2026-02-27
 
 ### Breaking changes
