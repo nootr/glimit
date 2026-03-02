@@ -274,8 +274,8 @@ pub fn apply_built(
   fn(input: a) -> b {
     let identifier = limiter.identifier(input)
     case limiter.rate_limiter_registry |> registry.get_or_create(identifier) {
-      Ok(rl) -> {
-        case rl |> rate_limiter.hit {
+      Ok(rate_limiter) -> {
+        case rate_limiter |> rate_limiter.hit {
           Ok(Nil) -> func(input)
           Error(rate_limiter.RateLimited) -> limiter.on_limit_exceeded(input)
           Error(rate_limiter.Unavailable) -> func(input)
