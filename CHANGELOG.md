@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 
+## 1.1.1 - 2026-03-03
+
+### Fixed
+
+- Protected rate limiter actor from crashing user-provided callbacks. A panicking `per_second` or `burst_limit` callback now returns `Unavailable` instead of killing the actor for all identifiers.
+- Switched from wall-clock time (`os:timestamp()`) to monotonic time (`erlang:monotonic_time/1`). Prevents NTP clock jumps from bypassing rate limits and eliminates backward clock jump bucket freezes.
+
+
 ## 1.1.0 - 2026-03-03
 
 ### Changed
