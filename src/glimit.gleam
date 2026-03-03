@@ -244,10 +244,6 @@ pub fn build(
     Some(burst_limit) -> burst_limit
     None -> per_second
   }
-  use rate_limiter_actor <- result.try(
-    rate_limiter.new(per_second, burst_limit)
-    |> result.map_error(fn(_) { "Failed to start rate limiter" }),
-  )
   use identifier <- result.try(case config.identifier {
     Some(identifier) -> Ok(identifier)
     None -> Error("`identifier` function is required")
@@ -256,6 +252,10 @@ pub fn build(
     Some(on_limit_exceeded) -> Ok(on_limit_exceeded)
     None -> Error("`on_limit_exceeded` function is required")
   })
+  use rate_limiter_actor <- result.try(
+    rate_limiter.new(per_second, burst_limit)
+    |> result.map_error(fn(_) { "Failed to start rate limiter" }),
+  )
 
   Ok(RateLimiter(
     rate_limiter_actor: rate_limiter_actor,

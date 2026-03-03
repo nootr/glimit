@@ -3,10 +3,8 @@ import gleam/otp/actor
 import gleeunit/should
 import glimit/utils
 
-pub fn now_returns_milliseconds_test() {
+pub fn now_is_monotonic_test() {
   let t1 = utils.now()
-  // Should be a reasonable epoch milliseconds value (after 2024-01-01)
-  let assert True = t1 > 1_704_067_200_000
   // Two calls should be monotonically non-decreasing
   let t2 = utils.now()
   let assert True = t2 >= t1

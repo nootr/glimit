@@ -4,13 +4,14 @@
 import gleam/erlang/process.{type Subject}
 import gleam/result
 
-@external(erlang, "os", "timestamp")
-fn now_erlang() -> #(Int, Int, Int)
+@external(erlang, "glimit_ffi", "monotonic_now_ms")
+fn monotonic_now_ms() -> Int
 
-/// Get the current time in epoch milliseconds.
+/// Get the current monotonic time in milliseconds.
+/// Monotonic time is immune to wall-clock adjustments (NTP, manual changes)
+/// and is suitable for measuring elapsed intervals.
 pub fn now() -> Int {
-  let #(megaseconds, seconds, microseconds) = now_erlang()
-  megaseconds * 1_000_000_000 + seconds * 1000 + microseconds / 1000
+  monotonic_now_ms()
 }
 
 /// Wrap a zero-arity function so that a crash returns `Error(Nil)`

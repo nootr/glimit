@@ -243,7 +243,7 @@ pub fn sweep(rate_limiter: RateLimiterActor(id)) -> Result(Nil, Nil) {
 }
 
 /// Set the current time for testing purposes.
-/// The `now` value must be in epoch milliseconds.
+/// The `now` value is in milliseconds.
 ///
 pub fn set_now(rate_limiter: RateLimiterActor(id), now: Int) -> Nil {
   let _ = utils.safe_call(rate_limiter, SetNow(now, _), call_timeout)
