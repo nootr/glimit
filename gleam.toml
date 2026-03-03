@@ -1,5 +1,5 @@
 name = "glimit"
-version = "1.1.1"
+version = "1.2.0"
 
 description = "A simple, framework-agnostic, in-memory rate limiter for Gleam."
 licences = ["MIT"]

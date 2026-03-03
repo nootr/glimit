@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 
+## 1.2.0 - 2026-03-03
+
+### Added
+
+- `max_idle(seconds)` builder function to configure the idle eviction threshold (default 60s). Pass `0` to disable idle eviction. Useful when `burst_limit` is much larger than `per_second` — e.g., `burst_limit=1000, per_second=1` needs ~1000s to refill, so the default 60s idle eviction would discard partially-refilled buckets prematurely.
+- Idle eviction for periodic sweep: buckets inactive for longer than the idle threshold are now removed even if not full, preventing unbounded memory growth from high-cardinality identifier spaces.
+- Security warning about `X-Forwarded-For` spoofability in wisp example.
+
+### Fixed
+
+- Fixed `burst_limit` doc comment incorrectly describing it as "per second" instead of "per burst".
+- Documented that `per_second_fn` and `burst_limit_fn` are evaluated once at bucket creation, not on every hit.
+
+
 ## 1.1.1 - 2026-03-03
 
 ### Fixed
