@@ -106,9 +106,7 @@ fn do_sweep(state: State(id)) -> State(id) {
   let now = get_now(state)
   let buckets =
     state.buckets
-    |> dict.filter(fn(_id, b) {
-      !bucket.is_full(b, now) && !is_idle(b, now)
-    })
+    |> dict.filter(fn(_id, b) { !bucket.is_full(b, now) && !is_idle(b, now) })
   State(..state, buckets: buckets)
 }
 
