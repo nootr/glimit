@@ -14,6 +14,16 @@ type TimeoutMsg {
   Ping(reply_with: Subject(Nil))
 }
 
+pub fn rescue_returns_ok_on_success_test() {
+  utils.rescue(fn() { 42 })
+  |> should.equal(Ok(42))
+}
+
+pub fn rescue_returns_error_on_crash_test() {
+  utils.rescue(fn() { panic as "boom" })
+  |> should.equal(Error(Nil))
+}
+
 pub fn safe_call_timeout_test() {
   // Start an actor that ignores all messages (never replies)
   let assert Ok(started) =

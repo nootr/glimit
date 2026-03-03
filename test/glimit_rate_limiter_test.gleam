@@ -218,6 +218,50 @@ pub fn invalid_config_returns_unavailable_test() {
   rate_limiter.get_count(rl) |> should.equal(1)
 }
 
+pub fn crashing_callback_returns_unavailable_test() {
+  let assert Ok(rl) =
+    rate_limiter.new(
+      fn(id) {
+        case id {
+          "crash" -> panic as "boom"
+          _ -> 2
+        }
+      },
+      fn(id) {
+        case id {
+          "crash" -> panic as "boom"
+          _ -> 2
+        }
+      },
+    )
+
+  // Crashing callback should return Unavailable, not kill the actor
+  rate_limiter.hit(rl, "crash")
+  |> should.equal(Error(rate_limiter.Unavailable))
+
+  // Actor is still alive and serving other identifiers
+  rate_limiter.hit(rl, "good") |> should.be_ok
+}
+
+pub fn crashing_single_callback_returns_unavailable_test() {
+  // Only per_second crashes; burst_limit is fine
+  let assert Ok(rl) =
+    rate_limiter.new(
+      fn(id) {
+        case id {
+          "crash" -> panic as "boom"
+          _ -> 2
+        }
+      },
+      fn(_) { 2 },
+    )
+
+  rate_limiter.hit(rl, "crash")
+  |> should.equal(Error(rate_limiter.Unavailable))
+
+  rate_limiter.hit(rl, "good") |> should.be_ok
+}
+
 pub fn dead_rate_limiter_returns_unavailable_test() {
   let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
 
