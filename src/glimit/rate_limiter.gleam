@@ -11,8 +11,6 @@ import glimit/utils
 
 const call_timeout = 1000
 
-const max_idle_ms = 60_000
-
 /// Error type returned by `hit`.
 ///
 pub type HitError {
@@ -41,6 +39,9 @@ type State(id) {
     /// The interval in milliseconds between sweeps.
     ///
     sweep_interval_ms: Option(Int),
+    /// The idle eviction threshold in milliseconds, or None to disable.
+    ///
+    max_idle_ms: Option(Int),
     /// The actor's own subject for self-messaging.
     ///
     self_subject: Subject(Message(id)),
@@ -106,15 +107,21 @@ fn do_sweep(state: State(id)) -> State(id) {
   let now = get_now(state)
   let buckets =
     state.buckets
-    |> dict.filter(fn(_id, b) { !bucket.is_full(b, now) && !is_idle(b, now) })
+    |> dict.filter(fn(_id, b) {
+      !bucket.is_full(b, now) && !is_idle(b, now, state.max_idle_ms)
+    })
   State(..state, buckets: buckets)
 }
 
-fn is_idle(state: BucketState, now: Int) -> Bool {
-  case state.last_update {
-    // A bucket with no last_update was never hit; treat as idle (defensive).
-    None -> True
-    Some(last_update) -> now - last_update > max_idle_ms
+fn is_idle(b: BucketState, now: Int, max_idle_ms: Option(Int)) -> Bool {
+  case max_idle_ms {
+    None -> False
+    Some(threshold) ->
+      case b.last_update {
+        // A bucket with no last_update was never hit; treat as idle (defensive).
+        None -> True
+        Some(last_update) -> now - last_update > threshold
+      }
   }
 }
 
@@ -189,6 +196,7 @@ fn handle_message(
 pub fn new(
   per_second: fn(id) -> Int,
   burst_limit: fn(id) -> Int,
+  max_idle_ms: Option(Int),
 ) -> Result(RateLimiterActor(id), Nil) {
   let sweep_interval_ms = Some(10_000)
 
@@ -199,6 +207,7 @@ pub fn new(
         token_rate: per_second,
         buckets: dict.new(),
         sweep_interval_ms: sweep_interval_ms,
+        max_idle_ms: max_idle_ms,
         self_subject: self_subject,
         now: None,
       )

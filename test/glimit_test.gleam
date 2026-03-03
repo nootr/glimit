@@ -556,6 +556,125 @@ pub fn apply4_test() {
   func("alice", 2, False, "y") |> should.equal("Stop!")
 }
 
+pub fn custom_max_idle_test() {
+  // burst_limit=100, per_second=1 with max_idle=120s
+  // At t=61s the bucket should NOT be evicted (threshold is 120s, not 60s)
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.burst_limit(100)
+    |> glimit.max_idle(120)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let func =
+    fn(_) { "OK" }
+    |> glimit.apply_built(limiter)
+
+  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
+
+  // Exhaust all 100 tokens
+  list.repeat(Nil, 100)
+  |> list.each(fn(_) { func(Nil) |> ignore })
+
+  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(1)
+
+  // At t=61_000: would be evicted with default 60s, but max_idle is 120s
+  rate_limiter.set_now(limiter.rate_limiter_actor, 61_000)
+  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
+  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(1)
+
+  // At t=121_000: now idle for 121s > 120s — evicted
+  rate_limiter.set_now(limiter.rate_limiter_actor, 121_000)
+  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
+  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(0)
+}
+
+pub fn disabled_idle_eviction_test() {
+  // max_idle(0) disables idle eviction entirely
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.burst_limit(100)
+    |> glimit.max_idle(0)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let func =
+    fn(_) { "OK" }
+    |> glimit.apply_built(limiter)
+
+  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
+
+  // Exhaust all 100 tokens
+  list.repeat(Nil, 100)
+  |> list.each(fn(_) { func(Nil) |> ignore })
+
+  // At t=61_000: bucket has 61 tokens (not full) and has been idle for >60s.
+  // With default idle eviction this would be swept, but max_idle(0) disables it.
+  rate_limiter.set_now(limiter.rate_limiter_actor, 61_000)
+  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
+  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(1)
+}
+
+pub fn negative_max_idle_disables_eviction_test() {
+  // Negative values should disable idle eviction (same as 0)
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.burst_limit(100)
+    |> glimit.max_idle(-5)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let func =
+    fn(_) { "OK" }
+    |> glimit.apply_built(limiter)
+
+  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
+
+  list.repeat(Nil, 100)
+  |> list.each(fn(_) { func(Nil) |> ignore })
+
+  // At t=61_000: idle for >60s but eviction is disabled
+  rate_limiter.set_now(limiter.rate_limiter_actor, 61_000)
+  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
+  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(1)
+}
+
+pub fn max_idle_overwrite_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.burst_limit(100)
+    |> glimit.max_idle(999)
+    |> glimit.max_idle(120)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let func =
+    fn(_) { "OK" }
+    |> glimit.apply_built(limiter)
+
+  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
+  list.repeat(Nil, 100)
+  |> list.each(fn(_) { func(Nil) |> ignore })
+
+  // At t=61_000: idle 61s, but max_idle is 120s (last set value) — kept
+  rate_limiter.set_now(limiter.rate_limiter_actor, 61_000)
+  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
+  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(1)
+
+  // At t=121_000: idle 121s > 120s — evicted
+  rate_limiter.set_now(limiter.rate_limiter_actor, 121_000)
+  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
+  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(0)
+}
+
 pub fn dead_rate_limiter_fails_open_test() {
   let assert Ok(limiter) =
     glimit.new()

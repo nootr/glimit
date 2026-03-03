@@ -3,10 +3,10 @@
 ////
 //// A single rate limiter actor stores all token bucket state. Each hit is a single
 //// message to the rate limiter, which performs the Token Bucket calculation inline.
-//// A periodic sweep removes full or idle (>60s without activity) buckets to
-//// reduce memory usage. The
-//// rate limiter fails open — if the rate limiter actor is unavailable, requests are
-//// allowed through.
+//// A periodic sweep removes full or idle buckets to reduce memory usage. The
+//// idle threshold defaults to 60 seconds and can be configured via `max_idle`.
+//// The rate limiter fails open — if the rate limiter actor is unavailable,
+//// requests are allowed through.
 ////
 //// The rate limits are configured using the following two options:
 ////
@@ -78,6 +78,7 @@ pub type RateLimiterBuilder(a, b, id) {
     burst_limit: Option(fn(id) -> Int),
     identifier: Option(fn(a) -> id),
     on_limit_exceeded: Option(fn(a) -> b),
+    max_idle_ms: Option(Int),
   )
 }
 
@@ -89,6 +90,7 @@ pub fn new() -> RateLimiterBuilder(a, b, id) {
     burst_limit: None,
     identifier: None,
     on_limit_exceeded: None,
+    max_idle_ms: Some(60_000),
   )
 }
 
@@ -197,6 +199,39 @@ pub fn burst_limit_fn(
   RateLimiterBuilder(..limiter, burst_limit: Some(burst_limit_fn))
 }
 
+/// Set the idle eviction threshold in seconds.
+///
+/// Buckets that have not been hit for longer than this duration are removed
+/// during periodic sweeps. The default is 60 seconds. Set to `0` to disable
+/// idle eviction entirely.
+///
+/// For rate limiters with a high `burst_limit` relative to `per_second`, you
+/// may want to increase this value so that partially-refilled buckets are not
+/// evicted prematurely. A good rule of thumb is
+/// `burst_limit / per_second` seconds.
+///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.per_second(1)
+///   |> glimit.burst_limit(1000)
+///   |> glimit.max_idle(1000)
+/// ```
+///
+pub fn max_idle(
+  limiter: RateLimiterBuilder(a, b, id),
+  seconds: Int,
+) -> RateLimiterBuilder(a, b, id) {
+  case seconds {
+    s if s <= 0 -> RateLimiterBuilder(..limiter, max_idle_ms: None)
+    s -> RateLimiterBuilder(..limiter, max_idle_ms: Some(s * 1000))
+  }
+}
+
 /// Set the handler to be called when the rate limit is reached.
 ///
 /// # Example
@@ -265,7 +300,7 @@ pub fn build(
     None -> Error("`on_limit_exceeded` function is required")
   })
   use rate_limiter_actor <- result.try(
-    rate_limiter.new(per_second, burst_limit)
+    rate_limiter.new(per_second, burst_limit, config.max_idle_ms)
     |> result.map_error(fn(_) { "Failed to start rate limiter" }),
   )
 

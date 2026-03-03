@@ -1,22 +1,23 @@
 import gleam/erlang/process
 import gleam/list
+import gleam/option.{Some}
 import gleeunit/should
 import glimit/rate_limiter
 
 pub fn hit_returns_ok_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.hit(rl, "a") |> should.be_ok
 }
 
 pub fn hit_rate_limited_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.hit(rl, "a") |> should.equal(Error(rate_limiter.RateLimited))
 }
 
 pub fn hit_different_ids_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 1 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 1 }, Some(60_000))
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.hit(rl, "a") |> should.equal(Error(rate_limiter.RateLimited))
   rate_limiter.hit(rl, "b") |> should.be_ok
@@ -24,26 +25,26 @@ pub fn hit_different_ids_test() {
 }
 
 pub fn get_count_empty_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.get_count(rl) |> should.equal(0)
 }
 
 pub fn get_count_after_hits_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.hit(rl, "b") |> should.be_ok
   rate_limiter.get_count(rl) |> should.equal(2)
 }
 
 pub fn same_id_same_count_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.get_count(rl) |> should.equal(1)
 }
 
 pub fn sweep_full_bucket_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
   // Hit then let it refill to full
   rate_limiter.hit(rl, "a") |> should.be_ok
@@ -54,7 +55,7 @@ pub fn sweep_full_bucket_test() {
 }
 
 pub fn sweep_not_full_bucket_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
   rate_limiter.hit(rl, "a") |> should.be_ok
   let assert Ok(Nil) = rate_limiter.sweep(rl)
@@ -63,7 +64,7 @@ pub fn sweep_not_full_bucket_test() {
 }
 
 pub fn sweep_after_long_time_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.hit(rl, "a") |> should.be_ok
@@ -77,12 +78,12 @@ pub fn sweep_after_long_time_test() {
 }
 
 pub fn sweep_empty_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   let assert Ok(Nil) = rate_limiter.sweep(rl)
 }
 
 pub fn sweep_mixed_buckets_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
 
   rate_limiter.hit(rl, "a") |> should.be_ok
@@ -100,7 +101,7 @@ pub fn sweep_mixed_buckets_test() {
 }
 
 pub fn sweep_keeps_active_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
   rate_limiter.hit(rl, "a") |> should.be_ok
   let assert Ok(Nil) = rate_limiter.sweep(rl)
@@ -109,7 +110,7 @@ pub fn sweep_keeps_active_test() {
 }
 
 pub fn sweep_all_active_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.hit(rl, "b") |> should.be_ok
@@ -120,7 +121,7 @@ pub fn sweep_all_active_test() {
 }
 
 pub fn remove_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.get_count(rl) |> should.equal(1)
   let assert Ok(Nil) = rate_limiter.remove(rl, "a")
@@ -128,12 +129,12 @@ pub fn remove_test() {
 }
 
 pub fn remove_nonexistent_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.remove(rl, "nonexistent") |> should.equal(Ok(Nil))
 }
 
 pub fn set_now_and_hit_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 3 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 3 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
 
   rate_limiter.hit(rl, "a") |> should.be_ok
@@ -149,7 +150,7 @@ pub fn set_now_and_hit_test() {
 }
 
 pub fn sweep_get_count_after_sweep_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
 
   // Hit "keep" so it's active
@@ -181,6 +182,7 @@ pub fn dynamic_config_test() {
           _ -> 1
         }
       },
+      Some(60_000),
     )
 
   rate_limiter.hit(rl, "fast") |> should.be_ok
@@ -206,6 +208,7 @@ pub fn invalid_config_returns_unavailable_test() {
           _ -> 2
         }
       },
+      Some(60_000),
     )
 
   // Valid identifier works
@@ -234,6 +237,7 @@ pub fn crashing_callback_returns_unavailable_test() {
           _ -> 2
         }
       },
+      Some(60_000),
     )
 
   // Crashing callback should return Unavailable, not kill the actor
@@ -255,6 +259,7 @@ pub fn crashing_single_callback_returns_unavailable_test() {
         }
       },
       fn(_) { 2 },
+      Some(60_000),
     )
 
   rate_limiter.hit(rl, "crash")
@@ -267,7 +272,7 @@ pub fn sweep_idle_bucket_test() {
   // burst_limit=100, per_second=1: after exhausting all tokens, the bucket
   // needs 100 seconds to refill. At t=61s it has 61 tokens (not full), but
   // has been idle for >60s and should be swept.
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 100 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 100 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
 
   // Exhaust all 100 tokens
@@ -289,7 +294,7 @@ pub fn sweep_idle_bucket_test() {
 
 pub fn sweep_idle_exact_boundary_test() {
   // At exactly 60s, idle duration is NOT > 60s, so bucket should be kept
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 100 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 100 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
 
   list.repeat(Nil, 100)
@@ -307,7 +312,7 @@ pub fn sweep_idle_exact_boundary_test() {
 
 pub fn sweep_idle_preserves_recent_bucket_test() {
   // Same setup, but sweep before the idle threshold — bucket should be kept
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 100 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 100 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
 
   list.repeat(Nil, 100)
@@ -325,7 +330,7 @@ pub fn sweep_idle_preserves_recent_bucket_test() {
 }
 
 pub fn dead_rate_limiter_returns_unavailable_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 })
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
 
   // Trap exits so the kill signal doesn't crash the test process
   let _trapped = process.trap_exits(True)
