@@ -18,7 +18,7 @@ pub type BucketState {
     /// The number of tokens available.
     ///
     token_count: Float,
-    /// Epoch timestamp (milliseconds) of the last time the bucket was updated.
+    /// Monotonic timestamp (milliseconds) of the last time the bucket was updated.
     ///
     last_update: Option(Int),
   )
