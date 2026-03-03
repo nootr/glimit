@@ -83,12 +83,12 @@ fn ensure_bucket(
   case dict.get(state.buckets, identifier) {
     Ok(b) -> Ok(#(b, state))
     Error(_) -> {
-      use max <- result.try(utils.rescue(fn() {
-        state.max_token_count(identifier)
-      }))
-      use rate <- result.try(utils.rescue(fn() {
-        state.token_rate(identifier)
-      }))
+      use max <- result.try(
+        utils.rescue(fn() { state.max_token_count(identifier) }),
+      )
+      use rate <- result.try(
+        utils.rescue(fn() { state.token_rate(identifier) }),
+      )
       case bucket.new(max, rate) {
         Ok(b) -> {
           let buckets = dict.insert(state.buckets, identifier, b)
