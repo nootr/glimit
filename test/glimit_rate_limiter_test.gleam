@@ -287,6 +287,24 @@ pub fn sweep_idle_bucket_test() {
   rate_limiter.get_count(rl) |> should.equal(0)
 }
 
+pub fn sweep_idle_exact_boundary_test() {
+  // At exactly 60s, idle duration is NOT > 60s, so bucket should be kept
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 100 })
+  rate_limiter.set_now(rl, 0)
+
+  list.repeat(Nil, 100)
+  |> list.each(fn(_) {
+    let _ = rate_limiter.hit(rl, "a")
+    Nil
+  })
+
+  rate_limiter.set_now(rl, 60_000)
+  let assert Ok(Nil) = rate_limiter.sweep(rl)
+
+  // 60_000 - 0 = 60_000, which is NOT > 60_000 — kept
+  rate_limiter.get_count(rl) |> should.equal(1)
+}
+
 pub fn sweep_idle_preserves_recent_bucket_test() {
   // Same setup, but sweep before the idle threshold — bucket should be kept
   let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 100 })

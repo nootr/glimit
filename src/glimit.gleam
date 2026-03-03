@@ -3,7 +3,8 @@
 ////
 //// A single rate limiter actor stores all token bucket state. Each hit is a single
 //// message to the rate limiter, which performs the Token Bucket calculation inline.
-//// A periodic sweep removes idle (full) buckets to reduce memory usage. The
+//// A periodic sweep removes full or idle (>60s without activity) buckets to
+//// reduce memory usage. The
 //// rate limiter fails open — if the rate limiter actor is unavailable, requests are
 //// allowed through.
 ////

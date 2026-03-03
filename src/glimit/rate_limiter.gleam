@@ -112,6 +112,7 @@ fn do_sweep(state: State(id)) -> State(id) {
 
 fn is_idle(state: BucketState, now: Int) -> Bool {
   case state.last_update {
+    // A bucket with no last_update was never hit; treat as idle (defensive).
     None -> True
     Some(last_update) -> now - last_update > max_idle_ms
   }
@@ -244,7 +245,7 @@ pub fn remove(
   utils.safe_call(rate_limiter, Remove(identifier, _), call_timeout)
 }
 
-/// Remove full buckets from the rate limiter synchronously.
+/// Remove full or idle buckets from the rate limiter synchronously.
 /// Intended for testing — production uses the periodic `Sweep` timer.
 ///
 pub fn sweep(rate_limiter: RateLimiterActor(id)) -> Result(Nil, Nil) {
