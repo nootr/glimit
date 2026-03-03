@@ -11,6 +11,8 @@ import glimit/utils
 
 const call_timeout = 1000
 
+const max_idle_ms = 60_000
+
 /// Error type returned by `hit`.
 ///
 pub type HitError {
@@ -104,8 +106,16 @@ fn do_sweep(state: State(id)) -> State(id) {
   let now = get_now(state)
   let buckets =
     state.buckets
-    |> dict.filter(fn(_id, b) { !bucket.is_full(b, now) })
+    |> dict.filter(fn(_id, b) { !bucket.is_full(b, now) && !is_idle(b, now) })
   State(..state, buckets: buckets)
+}
+
+fn is_idle(state: BucketState, now: Int) -> Bool {
+  case state.last_update {
+    // A bucket with no last_update was never hit; treat as idle (defensive).
+    None -> True
+    Some(last_update) -> now - last_update > max_idle_ms
+  }
 }
 
 fn schedule_sweep(state: State(id)) -> Nil {
@@ -235,7 +245,7 @@ pub fn remove(
   utils.safe_call(rate_limiter, Remove(identifier, _), call_timeout)
 }
 
-/// Remove full buckets from the rate limiter synchronously.
+/// Remove full or idle buckets from the rate limiter synchronously.
 /// Intended for testing — production uses the periodic `Sweep` timer.
 ///
 pub fn sweep(rate_limiter: RateLimiterActor(id)) -> Result(Nil, Nil) {

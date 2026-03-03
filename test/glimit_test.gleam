@@ -583,6 +583,41 @@ pub fn dead_rate_limiter_fails_open_test() {
   func("user") |> should.equal("OK")
 }
 
+pub fn per_second_zero_fails_open_test() {
+  // per_second(0) is invalid — bucket creation fails at hit time,
+  // so the limiter fails open and the original function is called.
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(0)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let func =
+    fn(_) { "OK" }
+    |> glimit.apply_built(limiter)
+
+  // Invalid config causes Unavailable → fails open
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("OK")
+}
+
+pub fn per_second_negative_fails_open_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(-1)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let func =
+    fn(_) { "OK" }
+    |> glimit.apply_built(limiter)
+
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("OK")
+}
+
 fn ignore(_value: a) -> Nil {
   Nil
 }
