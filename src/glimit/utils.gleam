@@ -13,6 +13,12 @@ pub fn now() -> Int {
   megaseconds * 1_000_000_000 + seconds * 1000 + microseconds / 1000
 }
 
+/// Wrap a zero-arity function so that a crash returns `Error(Nil)`
+/// instead of propagating.
+///
+@external(erlang, "glimit_ffi", "rescue")
+pub fn rescue(f: fn() -> a) -> Result(a, Nil)
+
 /// Like process.call but returns Result instead of panicking on timeout or
 /// callee death.
 ///
