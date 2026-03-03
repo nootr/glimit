@@ -1,7 +1,7 @@
 # glimit
 
 [![Package Version](https://img.shields.io/hexpm/v/glimit)](https://hex.pm/packages/glimit)
-[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/glimit/)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/glimit/glimit.html)
 [![test](https://github.com/nootr/glimit/actions/workflows/test.yml/badge.svg)](https://github.com/nootr/glimit/actions/workflows/test.yml)
 
 A simple, framework-agnostic, in-memory rate limiter for Gleam. 💫
