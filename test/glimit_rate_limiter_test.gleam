@@ -1,4 +1,5 @@
 import gleam/erlang/process
+import gleam/list
 import gleeunit/should
 import glimit/rate_limiter
 
@@ -260,6 +261,49 @@ pub fn crashing_single_callback_returns_unavailable_test() {
   |> should.equal(Error(rate_limiter.Unavailable))
 
   rate_limiter.hit(rl, "good") |> should.be_ok
+}
+
+pub fn sweep_idle_bucket_test() {
+  // burst_limit=100, per_second=1: after exhausting all tokens, the bucket
+  // needs 100 seconds to refill. At t=61s it has 61 tokens (not full), but
+  // has been idle for >60s and should be swept.
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 100 })
+  rate_limiter.set_now(rl, 0)
+
+  // Exhaust all 100 tokens
+  list.repeat(Nil, 100)
+  |> list.each(fn(_) {
+    let _ = rate_limiter.hit(rl, "a")
+    Nil
+  })
+
+  rate_limiter.get_count(rl) |> should.equal(1)
+
+  // At t=61_000: tokens = 0 + 61 = 61 < 100, not full
+  // But idle for 61s > 60s threshold — should be swept
+  rate_limiter.set_now(rl, 61_000)
+  let assert Ok(Nil) = rate_limiter.sweep(rl)
+
+  rate_limiter.get_count(rl) |> should.equal(0)
+}
+
+pub fn sweep_idle_preserves_recent_bucket_test() {
+  // Same setup, but sweep before the idle threshold — bucket should be kept
+  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 100 })
+  rate_limiter.set_now(rl, 0)
+
+  list.repeat(Nil, 100)
+  |> list.each(fn(_) {
+    let _ = rate_limiter.hit(rl, "a")
+    Nil
+  })
+
+  // At t=59_000: tokens = 59 < 100 (not full), idle for 59s < 60s (not idle)
+  rate_limiter.set_now(rl, 59_000)
+  let assert Ok(Nil) = rate_limiter.sweep(rl)
+
+  // Should be kept — not full and not idle
+  rate_limiter.get_count(rl) |> should.equal(1)
 }
 
 pub fn dead_rate_limiter_returns_unavailable_test() {

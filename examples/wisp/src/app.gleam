@@ -13,6 +13,9 @@ pub fn main() {
     glimit.new()
     |> glimit.per_second(1)
     |> glimit.burst_limit(5)
+    // NOTE: X-Forwarded-For is trivially spoofable by clients. Only trust
+    // this header when running behind a trusted reverse proxy. In production,
+    // extract only the first or last IP depending on your proxy configuration.
     |> glimit.identifier(fn(req: Request) {
       req
       |> request.get_header("X-Forwarded-For")

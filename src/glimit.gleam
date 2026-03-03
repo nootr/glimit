@@ -119,6 +119,11 @@ pub fn per_second(
 
 /// Set the rate limit per second, based on the identifier.
 ///
+/// Note: this function is evaluated once when a bucket is first created for an
+/// identifier. If the function returns a different value later, existing buckets
+/// are not affected until they are swept (due to idleness or being full) and
+/// re-created on the next hit.
+///
 /// # Example
 ///
 /// ```gleam
@@ -142,7 +147,8 @@ pub fn per_second_fn(
 /// Set the maximum number of available tokens.
 ///
 /// The maximum number of available tokens is the maximum number of requests that can be
-/// made in a single second. The default value is the same as the rate limit per second.
+/// made in a single burst when the bucket is full. The default value is the same as the
+/// rate limit per second.
 ///
 /// # Example
 ///
@@ -163,6 +169,11 @@ pub fn burst_limit(
 }
 
 /// Set the maximum number of available tokens, based on the identifier.
+///
+/// Note: this function is evaluated once when a bucket is first created for an
+/// identifier. If the function returns a different value later, existing buckets
+/// are not affected until they are swept (due to idleness or being full) and
+/// re-created on the next hit.
 ///
 /// # Example
 ///
