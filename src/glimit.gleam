@@ -1,11 +1,11 @@
-//// This module provides a distributed rate limiter that can be used to limit the
-//// number of requests or function calls per second for a given identifier.
+//// This module provides a rate limiter that can be used to limit the number of
+//// requests or function calls per second for a given identifier.
 ////
-//// A single actor is used to assign one rate limiter actor per identifier. The
-//// rate limiter actor then uses a Token Bucket algorithm to determine if a
-//// request or function call should be allowed to proceed. A separate process is
-//// polling the rate limiters to remove full buckets to reduce unnecessary memory
-//// usage.
+//// A single registry actor stores all token bucket state. Each hit is a single
+//// message to the registry, which performs the Token Bucket calculation inline.
+//// A periodic sweep removes idle (full) buckets to reduce memory usage. The
+//// rate limiter fails open — if the registry is unavailable, requests are
+//// allowed through.
 ////
 //// The rate limits are configured using the following two options:
 ////
@@ -58,13 +58,12 @@
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import glimit/rate_limiter
-import glimit/registry.{type RateLimiterRegistryActor}
 
 /// A rate limiter.
 ///
 pub type RateLimiter(a, b, id) {
   RateLimiter(
-    rate_limiter_registry: RateLimiterRegistryActor(id),
+    rate_limiter_actor: rate_limiter.RateLimiterActor(id),
     on_limit_exceeded: fn(a) -> b,
     identifier: fn(a) -> id,
   )
@@ -245,9 +244,9 @@ pub fn build(
     Some(burst_limit) -> burst_limit
     None -> per_second
   }
-  use rate_limiter_registry <- result.try(
-    registry.new(per_second, burst_limit)
-    |> result.map_error(fn(_) { "Failed to start rate limiter registry" }),
+  use rate_limiter_actor <- result.try(
+    rate_limiter.new(per_second, burst_limit)
+    |> result.map_error(fn(_) { "Failed to start rate limiter" }),
   )
   use identifier <- result.try(case config.identifier {
     Some(identifier) -> Ok(identifier)
@@ -259,7 +258,7 @@ pub fn build(
   })
 
   Ok(RateLimiter(
-    rate_limiter_registry: rate_limiter_registry,
+    rate_limiter_actor: rate_limiter_actor,
     on_limit_exceeded: on_limit_exceeded,
     identifier: identifier,
   ))
@@ -292,16 +291,10 @@ pub fn apply_built(
 ) -> fn(a) -> b {
   fn(input: a) -> b {
     let identifier = limiter.identifier(input)
-    case limiter.rate_limiter_registry |> registry.get_or_create(identifier) {
-      Ok(rate_limiter) -> {
-        case rate_limiter |> rate_limiter.hit {
-          Ok(Nil) -> func(input)
-          Error(rate_limiter.RateLimited) -> limiter.on_limit_exceeded(input)
-          Error(rate_limiter.Unavailable) -> func(input)
-        }
-      }
-      // Fail open — if rate limiting infrastructure fails, let requests through
-      Error(_) -> func(input)
+    case rate_limiter.hit(limiter.rate_limiter_actor, identifier) {
+      Ok(Nil) -> func(input)
+      Error(rate_limiter.RateLimited) -> limiter.on_limit_exceeded(input)
+      Error(rate_limiter.Unavailable) -> func(input)
     }
   }
 }
