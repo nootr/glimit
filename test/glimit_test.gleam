@@ -316,7 +316,7 @@ pub fn integration_many_identifiers_test() {
     |> list.each(fn(_) { func(id) |> ignore })
   })
 
-  // id_0 was never hit so doesn't exist in registry
+  // id_0 was never hit so doesn't exist in rate limiter
   // id_1..id_9 were hit at least once
   let count_before = rate_limiter.get_count(limiter.rate_limiter_actor)
   // id_0 never hit = 0 entries, id_1..id_9 = 9 entries
@@ -556,7 +556,7 @@ pub fn apply4_test() {
   func("alice", 2, False, "y") |> should.equal("Stop!")
 }
 
-pub fn dead_registry_fails_open_test() {
+pub fn dead_rate_limiter_fails_open_test() {
   let assert Ok(limiter) =
     glimit.new()
     |> glimit.per_second(2)
@@ -574,7 +574,7 @@ pub fn dead_registry_fails_open_test() {
   // Trap exits so the kill signal doesn't crash the test process
   let _trapped = process.trap_exits(True)
 
-  // Kill the registry actor
+  // Kill the rate limiter actor
   let assert Ok(pid) = process.subject_owner(limiter.rate_limiter_actor)
   process.kill(pid)
   process.sleep(10)

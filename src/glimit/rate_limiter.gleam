@@ -55,7 +55,7 @@ pub type Message(id) {
   /// Return the number of tracked identifiers.
   ///
   GetCount(reply_with: Subject(Int))
-  /// Remove an identifier from the registry.
+  /// Remove an identifier from the rate limiter.
   ///
   Remove(identifier: id, reply_with: Subject(Nil))
   /// Fire-and-forget sweep, used by send_after for periodic scheduling.

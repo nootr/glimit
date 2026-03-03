@@ -11,7 +11,7 @@ A simple, framework-agnostic, in-memory rate limiter for Gleam. 💫
 
 * ✨ Simple and easy to use.
 * 📏 Rate limits based on any key (e.g. IP address, or user ID).
-* 🪣 Uses a distributed Token Bucket algorithm to rate limit requests.
+* 🪣 Uses a Token Bucket algorithm to rate limit requests.
 * 🗄️ No back-end service needed; stores rate limit stats in-memory.
 
 
@@ -50,11 +50,10 @@ While the in-memory rate limiter is simple and easy to use, it does have an impo
 
 ## Performance
 
-Each rate limiter registry is a single OTP actor. Operations like `get_or_create`, `get_all`, and `remove` are serialized through it, so the registry itself is the throughput bottleneck — individual rate limiter actors run concurrently.
+All rate limiter state is held in a single OTP actor. Each hit is one message to this actor, which performs the token bucket calculation inline.
 
-* **Memory**: One actor per unique identifier. Idle identifiers (full token buckets) are automatically swept every 10 seconds and shut down.
-* **Sweep**: Entries are processed in batches of 50 with a 10ms per-call timeout. Between batches, other registry messages (hits, lookups) can interleave, so sweeps don't block the registry for large numbers of identifiers.
-* **Fail-open**: If a rate limiter actor dies or times out, the request is allowed through rather than rejected.
+* **Memory**: One dict entry per unique identifier. Idle identifiers (full token buckets) are automatically swept every 10 seconds.
+* **Fail-open**: If the rate limiter actor is unavailable, the request is allowed through rather than rejected.
 
 
 ## Documentation

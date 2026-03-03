@@ -1,10 +1,10 @@
 //// This module provides a rate limiter that can be used to limit the number of
 //// requests or function calls per second for a given identifier.
 ////
-//// A single registry actor stores all token bucket state. Each hit is a single
-//// message to the registry, which performs the Token Bucket calculation inline.
+//// A single rate limiter actor stores all token bucket state. Each hit is a single
+//// message to the rate limiter, which performs the Token Bucket calculation inline.
 //// A periodic sweep removes idle (full) buckets to reduce memory usage. The
-//// rate limiter fails open — if the registry is unavailable, requests are
+//// rate limiter fails open — if the rate limiter actor is unavailable, requests are
 //// allowed through.
 ////
 //// The rate limits are configured using the following two options:
@@ -266,7 +266,7 @@ pub fn build(
 
 /// Apply the rate limiter to a request handler or function.
 ///
-/// Panics if the rate limiter registry cannot be started or if the `identifier`
+/// Panics if the rate limiter cannot be started or if the `identifier`
 /// function or `on_limit_exceeded` function is missing.
 ///
 pub fn apply(
