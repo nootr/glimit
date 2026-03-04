@@ -1,15 +1,18 @@
-//// This module contains a rate limiter actor that stores token-bucket state inline.
+//// This module contains a rate limiter actor that delegates to a pluggable Store.
 ////
 
-import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
+import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
+import gleam/string
 import glimit/bucket.{type BucketState}
 import glimit/utils
 
 const call_timeout = 1000
+
+const store_key_prefix = "glimit:"
 
 /// Error type returned by `hit`.
 ///
@@ -18,6 +21,8 @@ pub type HitError {
   RateLimited
   /// The rate limiter is unavailable.
   Unavailable
+  /// The store lock could not be acquired (fails open).
+  StoreLockFailed
 }
 
 pub type RateLimiterActor(id) =
@@ -33,18 +38,9 @@ type State(id) {
     /// The rate of token generation per second.
     ///
     token_rate: fn(id) -> Int,
-    /// Inline bucket state per identifier.
+    /// The store backend.
     ///
-    buckets: Dict(id, BucketState),
-    /// The interval in milliseconds between sweeps.
-    ///
-    sweep_interval_ms: Option(Int),
-    /// The idle eviction threshold in milliseconds, or None to disable.
-    ///
-    max_idle_ms: Option(Int),
-    /// The actor's own subject for self-messaging.
-    ///
-    self_subject: Subject(Message(id)),
+    store: bucket.Store,
     /// Test time override.
     ///
     now: Option(Int),
@@ -52,21 +48,9 @@ type State(id) {
 }
 
 pub type Message(id) {
-  /// Hit the rate limiter for the given id (creates bucket if missing).
+  /// Hit the rate limiter for the given id.
   ///
   Hit(identifier: id, reply_with: Subject(Result(Nil, HitError)))
-  /// Return the number of tracked identifiers.
-  ///
-  GetCount(reply_with: Subject(Int))
-  /// Remove an identifier from the rate limiter.
-  ///
-  Remove(identifier: id, reply_with: Subject(Nil))
-  /// Fire-and-forget sweep, used by send_after for periodic scheduling.
-  ///
-  Sweep
-  /// Synchronous sweep variant for tests.
-  ///
-  SweepSync(reply_with: Subject(Nil))
   /// Set the current time for testing purposes.
   ///
   SetNow(now: Int, reply_with: Subject(Nil))
@@ -79,59 +63,66 @@ fn get_now(state: State(id)) -> Int {
   }
 }
 
-fn ensure_bucket(
-  state: State(id),
-  identifier: id,
-) -> Result(#(BucketState, State(id)), Nil) {
-  case dict.get(state.buckets, identifier) {
-    Ok(b) -> Ok(#(b, state))
-    Error(_) -> {
-      use max <- result.try(
-        utils.rescue(fn() { state.max_token_count(identifier) }),
-      )
-      use rate <- result.try(
-        utils.rescue(fn() { state.token_rate(identifier) }),
-      )
-      case bucket.new(max, rate) {
-        Ok(b) -> {
-          let buckets = dict.insert(state.buckets, identifier, b)
-          Ok(#(b, State(..state, buckets: buckets)))
+fn handle_store_hit(state: State(id), identifier: id) -> Result(Nil, HitError) {
+  let key = string_key(identifier)
+  // 1. Lock
+  case state.store.lock(key) {
+    Error(_) -> Error(StoreLockFailed)
+    Ok(_) -> {
+      // 2. Get existing state or create new bucket
+      let bucket_result = case state.store.get(key) {
+        Ok(Some(b)) -> Ok(b)
+        Ok(None) -> {
+          use max <- result.try(
+            utils.rescue(fn() { state.max_token_count(identifier) }),
+          )
+          use rate <- result.try(
+            utils.rescue(fn() { state.token_rate(identifier) }),
+          )
+          bucket.new(max, rate)
         }
-        Error(_) -> Error(Nil)
+        Error(_) -> {
+          let _ = state.store.unlock(key)
+          Error(Nil)
+        }
+      }
+      case bucket_result {
+        Error(_) -> {
+          let _ = state.store.unlock(key)
+          Error(Unavailable)
+        }
+        Ok(b) -> {
+          // 3. Refill + consume
+          let now = get_now(state)
+          let #(hit_result, new_b) = bucket.hit(b, now)
+          // 4. Persist
+          let ttl = compute_ttl(new_b)
+          let _ = state.store.set(key, new_b, ttl)
+          // 5. Unlock
+          let _ = state.store.unlock(key)
+          case hit_result {
+            Ok(Nil) -> Ok(Nil)
+            Error(Nil) -> Error(RateLimited)
+          }
+        }
       }
     }
   }
 }
 
-fn do_sweep(state: State(id)) -> State(id) {
-  let now = get_now(state)
-  let buckets =
-    state.buckets
-    |> dict.filter(fn(_id, b) {
-      !bucket.is_full(b, now) && !is_idle(b, now, state.max_idle_ms)
-    })
-  State(..state, buckets: buckets)
+fn string_key(identifier: id) -> String {
+  store_key_prefix <> string.inspect(identifier)
 }
 
-fn is_idle(b: BucketState, now: Int, max_idle_ms: Option(Int)) -> Bool {
-  case max_idle_ms {
-    None -> False
-    Some(threshold) ->
-      case b.last_update {
-        // A bucket with no last_update was never hit; treat as idle (defensive).
-        None -> True
-        Some(last_update) -> now - last_update > threshold
-      }
-  }
-}
-
-fn schedule_sweep(state: State(id)) -> Nil {
-  case state.sweep_interval_ms {
-    Some(ms) -> {
-      let _ = process.send_after(state.self_subject, ms, Sweep)
-      Nil
+fn compute_ttl(b: BucketState) -> Int {
+  case b.token_rate > 0 {
+    True -> {
+      // Time to fully refill from empty, plus a buffer
+      let refill_seconds =
+        { b.max_token_count + b.token_rate - 1 } / b.token_rate
+      int.max(refill_seconds * 2, 60)
     }
-    None -> Nil
+    False -> 60
   }
 }
 
@@ -141,46 +132,8 @@ fn handle_message(
 ) -> actor.Next(State(id), Message(id)) {
   case message {
     Hit(identifier, client) -> {
-      case ensure_bucket(state, identifier) {
-        Ok(#(b, state)) -> {
-          let now = get_now(state)
-          let #(result, b) = bucket.hit(b, now)
-          let buckets = dict.insert(state.buckets, identifier, b)
-          let state = State(..state, buckets: buckets)
-          case result {
-            Ok(Nil) -> actor.send(client, Ok(Nil))
-            Error(Nil) -> actor.send(client, Error(RateLimited))
-          }
-          actor.continue(state)
-        }
-        Error(_) -> {
-          actor.send(client, Error(Unavailable))
-          actor.continue(state)
-        }
-      }
-    }
-
-    GetCount(client) -> {
-      actor.send(client, dict.size(state.buckets))
-      actor.continue(state)
-    }
-
-    Remove(identifier, client) -> {
-      let buckets = dict.delete(state.buckets, identifier)
-      let state = State(..state, buckets: buckets)
-      actor.send(client, Nil)
-      actor.continue(state)
-    }
-
-    Sweep -> {
-      let state = do_sweep(state)
-      schedule_sweep(state)
-      actor.continue(state)
-    }
-
-    SweepSync(client) -> {
-      let state = do_sweep(state)
-      actor.send(client, Nil)
+      let result = handle_store_hit(state, identifier)
+      actor.send(client, result)
       actor.continue(state)
     }
 
@@ -196,23 +149,16 @@ fn handle_message(
 pub fn new(
   per_second: fn(id) -> Int,
   burst_limit: fn(id) -> Int,
-  max_idle_ms: Option(Int),
+  store: bucket.Store,
 ) -> Result(RateLimiterActor(id), Nil) {
-  let sweep_interval_ms = Some(10_000)
-
   actor.new_with_initialiser(call_timeout, fn(self_subject) {
     let state =
       State(
         max_token_count: burst_limit,
         token_rate: per_second,
-        buckets: dict.new(),
-        sweep_interval_ms: sweep_interval_ms,
-        max_idle_ms: max_idle_ms,
-        self_subject: self_subject,
+        store: store,
         now: None,
       )
-
-    schedule_sweep(state)
 
     Ok(
       actor.initialised(state)
@@ -236,29 +182,6 @@ pub fn hit(
     Ok(Error(err)) -> Error(err)
     Error(Nil) -> Error(Unavailable)
   }
-}
-
-/// Return the number of tracked identifiers.
-///
-pub fn get_count(rate_limiter: RateLimiterActor(id)) -> Int {
-  utils.safe_call(rate_limiter, GetCount, call_timeout)
-  |> result.unwrap(0)
-}
-
-/// Remove an identifier from the rate limiter.
-///
-pub fn remove(
-  rate_limiter: RateLimiterActor(id),
-  identifier: id,
-) -> Result(Nil, Nil) {
-  utils.safe_call(rate_limiter, Remove(identifier, _), call_timeout)
-}
-
-/// Remove full or idle buckets from the rate limiter synchronously.
-/// Intended for testing — production uses the periodic `Sweep` timer.
-///
-pub fn sweep(rate_limiter: RateLimiterActor(id)) -> Result(Nil, Nil) {
-  utils.safe_call(rate_limiter, SweepSync, call_timeout)
 }
 
 /// Set the current time for testing purposes.

@@ -8,6 +8,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 
+## 1.3.0 - 2026-03-05
+
+### Added
+
+- Pluggable store backend for distributed rate limiting. Use `glimit.store(store)` to provide a custom storage adapter (e.g. Redis, Postgres) instead of the default in-memory backend. All token bucket logic stays in glimit — adapters only implement `get`/`set`/`lock`/`unlock`.
+- `glimit/bucket` module is now public, exposing `BucketState`, `Store`, and serialization helpers `to_pairs`/`from_pairs` for adapter authors.
+- `glimit.Store` type and `glimit.store()` builder function.
+- `glimit.HitError` type re-exported from the public API.
+- `glimit.get_count()`, `glimit.remove()`, and `glimit.sweep()` convenience functions on the built `RateLimiter` for in-memory store management.
+- Redis example (`examples/redis/`) demonstrating distributed rate limiting with [valkyrie](https://hexdocs.pm/valkyrie/).
+- CI job for the Redis example with a Redis service container.
+- CI smoke and rate limit tests for example workflows.
+- Automated Gleam dependency update workflow.
+
+### Changed
+
+- In-memory storage refactored into a dedicated `memory_store` OTP actor, replacing the inline `Dict` inside the rate limiter. The rate limiter now always delegates to a `Store` backend with no branching.
+- `RateLimiter` type now includes a `memory_store` field (opaque handle for sweep/count/remove on the default in-memory backend).
+- Bumped `peter-evans/create-pull-request` from 7 to 8.
+- Updated Gleam dependencies.
+
+
 ## 1.2.0 - 2026-03-03
 
 ### Added

@@ -1,12 +1,14 @@
 name = "glimit"
-version = "1.2.0"
+version = "1.3.0"
 
-description = "A simple, framework-agnostic, in-memory rate limiter for Gleam."
+description = "A simple, framework-agnostic rate limiter for Gleam with pluggable storage."
 licences = ["MIT"]
 repository = { type = "github", user = "nootr", repo = "glimit" }
 target = "erlang"
 internal_modules = [
-  "glimit/*",
+  "glimit/rate_limiter",
+  "glimit/memory_store",
+  "glimit/utils",
 ]
 
 [dependencies]

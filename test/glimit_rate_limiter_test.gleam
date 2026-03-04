@@ -2,22 +2,33 @@ import gleam/erlang/process
 import gleam/list
 import gleam/option.{Some}
 import gleeunit/should
+import glimit/memory_store
 import glimit/rate_limiter
 
+fn new_rl(
+  per_second: fn(String) -> Int,
+  burst_limit: fn(String) -> Int,
+  max_idle_ms: option.Option(Int),
+) -> #(rate_limiter.RateLimiterActor(String), memory_store.MemoryStore) {
+  let assert Ok(#(store, ms)) = memory_store.new(max_idle_ms, 10_000)
+  let assert Ok(rl) = rate_limiter.new(per_second, burst_limit, store)
+  #(rl, ms)
+}
+
 pub fn hit_returns_ok_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  let #(rl, _ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.hit(rl, "a") |> should.be_ok
 }
 
 pub fn hit_rate_limited_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  let #(rl, _ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.hit(rl, "a") |> should.equal(Error(rate_limiter.RateLimited))
 }
 
 pub fn hit_different_ids_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 1 }, Some(60_000))
+  let #(rl, _ms) = new_rl(fn(_) { 1 }, fn(_) { 1 }, Some(60_000))
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.hit(rl, "a") |> should.equal(Error(rate_limiter.RateLimited))
   rate_limiter.hit(rl, "b") |> should.be_ok
@@ -25,46 +36,45 @@ pub fn hit_different_ids_test() {
 }
 
 pub fn get_count_empty_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
-  rate_limiter.get_count(rl) |> should.equal(0)
+  let #(_rl, ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  memory_store.get_count(ms) |> should.equal(0)
 }
 
 pub fn get_count_after_hits_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  let #(rl, ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.hit(rl, "b") |> should.be_ok
-  rate_limiter.get_count(rl) |> should.equal(2)
+  memory_store.get_count(ms) |> should.equal(2)
 }
 
 pub fn same_id_same_count_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  let #(rl, ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.hit(rl, "a") |> should.be_ok
-  rate_limiter.get_count(rl) |> should.equal(1)
+  memory_store.get_count(ms) |> should.equal(1)
 }
 
 pub fn sweep_full_bucket_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  let #(rl, ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
   // Hit then let it refill to full
   rate_limiter.hit(rl, "a") |> should.be_ok
-  rate_limiter.set_now(rl, 1_000_000)
-  let assert Ok(Nil) = rate_limiter.sweep(rl)
+  let assert Ok(Nil) = memory_store.sweep(ms, 1_000_000, Some(60_000))
   // Full bucket should be swept
-  rate_limiter.get_count(rl) |> should.equal(0)
+  memory_store.get_count(ms) |> should.equal(0)
 }
 
 pub fn sweep_not_full_bucket_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  let #(rl, ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
   rate_limiter.hit(rl, "a") |> should.be_ok
-  let assert Ok(Nil) = rate_limiter.sweep(rl)
+  let assert Ok(Nil) = memory_store.sweep(ms, 0, Some(60_000))
   // Not full — should be kept
-  rate_limiter.get_count(rl) |> should.equal(1)
+  memory_store.get_count(ms) |> should.equal(1)
 }
 
 pub fn sweep_after_long_time_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  let #(rl, ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.hit(rl, "a") |> should.be_ok
@@ -72,18 +82,17 @@ pub fn sweep_after_long_time_test() {
   |> should.equal(Error(rate_limiter.RateLimited))
 
   // After a long time, bucket refills to full
-  rate_limiter.set_now(rl, 1_000_000)
-  let assert Ok(Nil) = rate_limiter.sweep(rl)
-  rate_limiter.get_count(rl) |> should.equal(0)
+  let assert Ok(Nil) = memory_store.sweep(ms, 1_000_000, Some(60_000))
+  memory_store.get_count(ms) |> should.equal(0)
 }
 
 pub fn sweep_empty_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
-  let assert Ok(Nil) = rate_limiter.sweep(rl)
+  let #(_rl, ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  let assert Ok(Nil) = memory_store.sweep(ms, 0, Some(60_000))
 }
 
 pub fn sweep_mixed_buckets_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  let #(rl, ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
 
   rate_limiter.hit(rl, "a") |> should.be_ok
@@ -92,49 +101,47 @@ pub fn sweep_mixed_buckets_test() {
   rate_limiter.hit(rl, "c") |> should.be_ok
   rate_limiter.hit(rl, "c") |> should.be_ok
 
-  // "a" and "c" are exhausted (0 tokens), "b" has 1 token
   // After long time, all refill to full
-  rate_limiter.set_now(rl, 1_000_000)
-  let assert Ok(Nil) = rate_limiter.sweep(rl)
+  let assert Ok(Nil) = memory_store.sweep(ms, 1_000_000, Some(60_000))
   // All refilled to full → all swept
-  rate_limiter.get_count(rl) |> should.equal(0)
+  memory_store.get_count(ms) |> should.equal(0)
 }
 
 pub fn sweep_keeps_active_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  let #(rl, ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
   rate_limiter.hit(rl, "a") |> should.be_ok
-  let assert Ok(Nil) = rate_limiter.sweep(rl)
+  let assert Ok(Nil) = memory_store.sweep(ms, 0, Some(60_000))
   // "a" has 1 token at t=0, not full → kept
-  rate_limiter.get_count(rl) |> should.equal(1)
+  memory_store.get_count(ms) |> should.equal(1)
 }
 
 pub fn sweep_all_active_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  let #(rl, ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
   rate_limiter.hit(rl, "a") |> should.be_ok
   rate_limiter.hit(rl, "b") |> should.be_ok
   rate_limiter.hit(rl, "c") |> should.be_ok
-  let assert Ok(Nil) = rate_limiter.sweep(rl)
+  let assert Ok(Nil) = memory_store.sweep(ms, 0, Some(60_000))
   // All have 1 token, not full → all kept
-  rate_limiter.get_count(rl) |> should.equal(3)
+  memory_store.get_count(ms) |> should.equal(3)
 }
 
 pub fn remove_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  let #(rl, ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.hit(rl, "a") |> should.be_ok
-  rate_limiter.get_count(rl) |> should.equal(1)
-  let assert Ok(Nil) = rate_limiter.remove(rl, "a")
-  rate_limiter.get_count(rl) |> should.equal(0)
+  memory_store.get_count(ms) |> should.equal(1)
+  let assert Ok(Nil) = memory_store.remove(ms, "glimit:\"a\"")
+  memory_store.get_count(ms) |> should.equal(0)
 }
 
 pub fn remove_nonexistent_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
-  rate_limiter.remove(rl, "nonexistent") |> should.equal(Ok(Nil))
+  let #(_rl, ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  memory_store.remove(ms, "glimit:\"nonexistent\"") |> should.equal(Ok(Nil))
 }
 
 pub fn set_now_and_hit_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 3 }, Some(60_000))
+  let #(rl, _ms) = new_rl(fn(_) { 1 }, fn(_) { 3 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
 
   rate_limiter.hit(rl, "a") |> should.be_ok
@@ -150,24 +157,24 @@ pub fn set_now_and_hit_test() {
 }
 
 pub fn sweep_get_count_after_sweep_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  let #(rl, ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
 
   // Hit "keep" so it's active
   rate_limiter.hit(rl, "keep") |> should.be_ok
-  // Hit "remove" and exhaust, then let it refill
+  // Hit "remove" and exhaust
   rate_limiter.hit(rl, "remove") |> should.be_ok
   rate_limiter.hit(rl, "remove") |> should.be_ok
 
   // At t=1_000_000, both refill to full
-  rate_limiter.set_now(rl, 1_000_000)
-  let assert Ok(Nil) = rate_limiter.sweep(rl)
+  let assert Ok(Nil) = memory_store.sweep(ms, 1_000_000, Some(60_000))
 
-  // "keep" had 1 token at t=0, after 1_000_000ms it will be full too
-  rate_limiter.get_count(rl) |> should.equal(0)
+  // Both full → both swept
+  memory_store.get_count(ms) |> should.equal(0)
 }
 
 pub fn dynamic_config_test() {
+  let assert Ok(#(store, _ms)) = memory_store.new(Some(60_000), 10_000)
   let assert Ok(rl) =
     rate_limiter.new(
       fn(id) {
@@ -182,7 +189,7 @@ pub fn dynamic_config_test() {
           _ -> 1
         }
       },
-      Some(60_000),
+      store,
     )
 
   rate_limiter.hit(rl, "fast") |> should.be_ok
@@ -193,7 +200,7 @@ pub fn dynamic_config_test() {
 }
 
 pub fn invalid_config_returns_unavailable_test() {
-  // per_second returns 0 for "bad" — invalid config
+  let assert Ok(#(store, ms)) = memory_store.new(Some(60_000), 10_000)
   let assert Ok(rl) =
     rate_limiter.new(
       fn(id) {
@@ -208,7 +215,7 @@ pub fn invalid_config_returns_unavailable_test() {
           _ -> 2
         }
       },
-      Some(60_000),
+      store,
     )
 
   // Valid identifier works
@@ -219,10 +226,11 @@ pub fn invalid_config_returns_unavailable_test() {
   |> should.equal(Error(rate_limiter.Unavailable))
 
   // Invalid identifier is not stored
-  rate_limiter.get_count(rl) |> should.equal(1)
+  memory_store.get_count(ms) |> should.equal(1)
 }
 
 pub fn crashing_callback_returns_unavailable_test() {
+  let assert Ok(#(store, _ms)) = memory_store.new(Some(60_000), 10_000)
   let assert Ok(rl) =
     rate_limiter.new(
       fn(id) {
@@ -237,7 +245,7 @@ pub fn crashing_callback_returns_unavailable_test() {
           _ -> 2
         }
       },
-      Some(60_000),
+      store,
     )
 
   // Crashing callback should return Unavailable, not kill the actor
@@ -249,7 +257,7 @@ pub fn crashing_callback_returns_unavailable_test() {
 }
 
 pub fn crashing_single_callback_returns_unavailable_test() {
-  // Only per_second crashes; burst_limit is fine
+  let assert Ok(#(store, _ms)) = memory_store.new(Some(60_000), 10_000)
   let assert Ok(rl) =
     rate_limiter.new(
       fn(id) {
@@ -259,7 +267,7 @@ pub fn crashing_single_callback_returns_unavailable_test() {
         }
       },
       fn(_) { 2 },
-      Some(60_000),
+      store,
     )
 
   rate_limiter.hit(rl, "crash")
@@ -269,10 +277,7 @@ pub fn crashing_single_callback_returns_unavailable_test() {
 }
 
 pub fn sweep_idle_bucket_test() {
-  // burst_limit=100, per_second=1: after exhausting all tokens, the bucket
-  // needs 100 seconds to refill. At t=61s it has 61 tokens (not full), but
-  // has been idle for >60s and should be swept.
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 100 }, Some(60_000))
+  let #(rl, ms) = new_rl(fn(_) { 1 }, fn(_) { 100 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
 
   // Exhaust all 100 tokens
@@ -282,19 +287,17 @@ pub fn sweep_idle_bucket_test() {
     Nil
   })
 
-  rate_limiter.get_count(rl) |> should.equal(1)
+  memory_store.get_count(ms) |> should.equal(1)
 
   // At t=61_000: tokens = 0 + 61 = 61 < 100, not full
   // But idle for 61s > 60s threshold — should be swept
-  rate_limiter.set_now(rl, 61_000)
-  let assert Ok(Nil) = rate_limiter.sweep(rl)
+  let assert Ok(Nil) = memory_store.sweep(ms, 61_000, Some(60_000))
 
-  rate_limiter.get_count(rl) |> should.equal(0)
+  memory_store.get_count(ms) |> should.equal(0)
 }
 
 pub fn sweep_idle_exact_boundary_test() {
-  // At exactly 60s, idle duration is NOT > 60s, so bucket should be kept
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 100 }, Some(60_000))
+  let #(rl, ms) = new_rl(fn(_) { 1 }, fn(_) { 100 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
 
   list.repeat(Nil, 100)
@@ -303,16 +306,13 @@ pub fn sweep_idle_exact_boundary_test() {
     Nil
   })
 
-  rate_limiter.set_now(rl, 60_000)
-  let assert Ok(Nil) = rate_limiter.sweep(rl)
-
   // 60_000 - 0 = 60_000, which is NOT > 60_000 — kept
-  rate_limiter.get_count(rl) |> should.equal(1)
+  let assert Ok(Nil) = memory_store.sweep(ms, 60_000, Some(60_000))
+  memory_store.get_count(ms) |> should.equal(1)
 }
 
 pub fn sweep_idle_preserves_recent_bucket_test() {
-  // Same setup, but sweep before the idle threshold — bucket should be kept
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 1 }, fn(_) { 100 }, Some(60_000))
+  let #(rl, ms) = new_rl(fn(_) { 1 }, fn(_) { 100 }, Some(60_000))
   rate_limiter.set_now(rl, 0)
 
   list.repeat(Nil, 100)
@@ -322,15 +322,14 @@ pub fn sweep_idle_preserves_recent_bucket_test() {
   })
 
   // At t=59_000: tokens = 59 < 100 (not full), idle for 59s < 60s (not idle)
-  rate_limiter.set_now(rl, 59_000)
-  let assert Ok(Nil) = rate_limiter.sweep(rl)
+  let assert Ok(Nil) = memory_store.sweep(ms, 59_000, Some(60_000))
 
   // Should be kept — not full and not idle
-  rate_limiter.get_count(rl) |> should.equal(1)
+  memory_store.get_count(ms) |> should.equal(1)
 }
 
 pub fn dead_rate_limiter_returns_unavailable_test() {
-  let assert Ok(rl) = rate_limiter.new(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
+  let #(rl, _ms) = new_rl(fn(_) { 2 }, fn(_) { 2 }, Some(60_000))
 
   // Trap exits so the kill signal doesn't crash the test process
   let _trapped = process.trap_exits(True)

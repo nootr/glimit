@@ -3,7 +3,38 @@
 
 import gleam/float
 import gleam/int
+import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
+
+const key_token_count = "tc"
+
+const key_last_update = "lu"
+
+const key_max_tokens = "mt"
+
+const key_token_rate = "tr"
+
+/// A pluggable storage backend for distributed rate limiting.
+///
+/// All token bucket logic is handled by glimit — store adapters only need to
+/// implement simple get/set/lock/unlock operations on string-keyed bucket state.
+///
+/// - `get`: Retrieve bucket state by key. Return `Ok(None)` for a new/missing key.
+/// - `set`: Persist bucket state with a TTL in seconds for automatic expiry.
+/// - `lock`: Acquire an exclusive lock for the key. Return `Error(Nil)` if unavailable.
+/// - `unlock`: Release the lock for the key.
+///
+/// When a lock or get fails, the rate limiter **fails open** (allows the request).
+///
+pub type Store {
+  Store(
+    get: fn(String) -> Result(Option(BucketState), Nil),
+    set: fn(String, BucketState, Int) -> Result(Nil, Nil),
+    lock: fn(String) -> Result(Nil, Nil),
+    unlock: fn(String) -> Result(Nil, Nil),
+  )
+}
 
 /// The state of a single token bucket.
 ///
@@ -79,6 +110,53 @@ pub fn hit(state: BucketState, now: Int) -> #(Result(Nil, Nil), BucketState) {
     )
     False -> #(Error(Nil), state)
   }
+}
+
+/// Convert a BucketState to a list of string key-value pairs.
+///
+/// Useful for serializing bucket state into external stores (e.g. Redis HSET).
+/// Keys: `"tc"` (token count), `"lu"` (last update), `"mt"` (max tokens), `"tr"` (token rate).
+///
+pub fn to_pairs(state: BucketState) -> List(#(String, String)) {
+  let lu = case state.last_update {
+    Some(v) -> int.to_string(v)
+    None -> ""
+  }
+  [
+    #(key_token_count, float.to_string(state.token_count)),
+    #(key_last_update, lu),
+    #(key_max_tokens, int.to_string(state.max_token_count)),
+    #(key_token_rate, int.to_string(state.token_rate)),
+  ]
+}
+
+/// Parse a BucketState from a list of string key-value pairs.
+///
+/// This is the inverse of `to_pairs`. Returns `Error(Nil)` if any required
+/// field is missing or cannot be parsed.
+///
+pub fn from_pairs(pairs: List(#(String, String))) -> Result(BucketState, Nil) {
+  use tc_str <- result.try(list.key_find(pairs, key_token_count))
+  use lu_str <- result.try(list.key_find(pairs, key_last_update))
+  use mt_str <- result.try(list.key_find(pairs, key_max_tokens))
+  use tr_str <- result.try(list.key_find(pairs, key_token_rate))
+  use tc <- result.try(float.parse(tc_str))
+  use mt <- result.try(int.parse(mt_str))
+  use tr <- result.try(int.parse(tr_str))
+  let lu = case lu_str {
+    "" -> None
+    s ->
+      case int.parse(s) {
+        Ok(v) -> Some(v)
+        Error(_) -> None
+      }
+  }
+  Ok(BucketState(
+    token_count: tc,
+    last_update: lu,
+    max_token_count: mt,
+    token_rate: tr,
+  ))
 }
 
 /// Returns True if the bucket is full after refilling.
