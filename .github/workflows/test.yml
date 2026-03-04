@@ -27,6 +27,13 @@ jobs:
       fail-fast: false
       matrix:
         example: [lustre, mist, wisp]
+        include:
+          - example: lustre
+            expected: "glimit + Lustre"
+          - example: mist
+            expected: "Hello, world!"
+          - example: wisp
+            expected: "Hi!"
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -36,3 +43,21 @@ jobs:
           rebar3-version: "3"
       - run: gleam build
         working-directory: examples/${{ matrix.example }}
+      - name: Start server
+        run: |
+          gleam run &
+          echo $! > /tmp/server.pid
+        working-directory: examples/${{ matrix.example }}
+      - name: Smoke test
+        run: |
+          curl --retry 5 --retry-connrefused --retry-delay 1 -sf http://localhost:8000/ | grep -q '${{ matrix.expected }}'
+      - name: Rate limit test
+        run: |
+          for i in $(seq 1 10); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/)
+            echo "Request $i: HTTP $CODE"
+          done
+          echo "$CODE" | grep -q "429"
+      - name: Stop server
+        if: always()
+        run: kill "$(cat /tmp/server.pid)" 2>/dev/null || true
