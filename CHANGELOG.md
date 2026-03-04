@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 
+## 1.3.1 - 2026-03-05
+
+### Fixed
+
+- Replaced outdated radish code snippet in module docs with a reference to `examples/redis/` (which uses valkyrie).
+
+
 ## 1.3.0 - 2026-03-05
 
 ### Added
