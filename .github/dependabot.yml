@@ -7,28 +7,28 @@ updates:
     commit-message:
       prefix: "chore"
 
-  - package-ecosystem: "hex"
+  - package-ecosystem: "mix"
     directory: "/"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "chore"
 
-  - package-ecosystem: "hex"
+  - package-ecosystem: "mix"
     directory: "/examples/mist"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "chore"
 
-  - package-ecosystem: "hex"
+  - package-ecosystem: "mix"
     directory: "/examples/lustre"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "chore"
 
-  - package-ecosystem: "hex"
+  - package-ecosystem: "mix"
     directory: "/examples/wisp"
     schedule:
       interval: "weekly"
