@@ -1,8 +1,13 @@
-import gleam/erlang/process
+import gleam/dict
+import gleam/erlang/process.{type Subject}
 import gleam/list
+import gleam/option
+import gleam/otp/actor
 import gleeunit
 import gleeunit/should
 import glimit
+import glimit/bucket
+import glimit/memory_store
 import glimit/rate_limiter
 
 pub fn main() {
@@ -265,25 +270,19 @@ pub fn sweep_preserves_active_limiters_test() {
     fn(_) { "OK" }
     |> glimit.apply_built(limiter)
 
+  let assert option.Some(ms) = limiter.memory_store
+
   rate_limiter.set_now(limiter.rate_limiter_actor, 0)
 
   // Hit "user_a" once — active, not full
   func("user_a") |> should.equal("OK")
-  // Hit "user_b" to create it, then let it go full
-  // Actually, just don't hit "user_b" — it won't exist until hit
-  // So we need to hit it and let it refill
   func("user_b") |> should.equal("OK")
   func("user_b") |> should.equal("OK")
 
-  // At t=1_000_000 both refill to full
-  // But we want "user_b" full and "user_a" not full at sweep time
-  // Let's restart: user_a has 1 token used at t=0, user_b fully consumed at t=0
-  // At sweep time t=0: user_a has 1/2 tokens (not full), user_b has 0/2 tokens (not full)
-  // Neither gets swept — that's correct behavior for this architecture
-  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
+  let assert Ok(Nil) = memory_store.sweep(ms, 0, option.Some(60_000))
 
   // Both are active (not full) → both kept
-  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(2)
+  memory_store.get_count(ms) |> should.equal(2)
 
   // user_a still has 1 token left
   func("user_a") |> should.equal("OK")
@@ -303,6 +302,8 @@ pub fn integration_many_identifiers_test() {
     fn(_) { "OK" }
     |> glimit.apply_built(limiter)
 
+  let assert option.Some(ms) = limiter.memory_store
+
   rate_limiter.set_now(limiter.rate_limiter_actor, 0)
 
   let ids = [
@@ -316,18 +317,15 @@ pub fn integration_many_identifiers_test() {
     |> list.each(fn(_) { func(id) |> ignore })
   })
 
-  // id_0 was never hit so doesn't exist in rate limiter
+  // id_0 was never hit so doesn't exist
   // id_1..id_9 were hit at least once
-  let count_before = rate_limiter.get_count(limiter.rate_limiter_actor)
-  // id_0 never hit = 0 entries, id_1..id_9 = 9 entries
+  let count_before = memory_store.get_count(ms)
   count_before |> should.equal(9)
 
-  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
+  let assert Ok(Nil) = memory_store.sweep(ms, 0, option.Some(60_000))
 
-  // At t=0, none have had time to refill. id_3 (3 hits = fully consumed) is not full.
-  // Only buckets that are still at max capacity get swept.
-  // Since all were hit, none are full → all kept
-  let count_after = rate_limiter.get_count(limiter.rate_limiter_actor)
+  // At t=0, none have had time to refill — all kept
+  let count_after = memory_store.get_count(ms)
   count_after |> should.equal(9)
 }
 
@@ -343,6 +341,8 @@ pub fn integration_sweep_then_reuse_test() {
     fn(_) { "OK" }
     |> glimit.apply_built(limiter)
 
+  let assert option.Some(ms) = limiter.memory_store
+
   rate_limiter.set_now(limiter.rate_limiter_actor, 0)
 
   // Exhaust "user_a" (all tokens used)
@@ -353,10 +353,10 @@ pub fn integration_sweep_then_reuse_test() {
   // Hit "user_b" once
   func("user_b") |> should.equal("OK")
 
-  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
+  let assert Ok(Nil) = memory_store.sweep(ms, 0, option.Some(60_000))
 
   // At t=0, user_a has 0 tokens (not full), user_b has 1 token (not full) → both kept
-  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(2)
+  memory_store.get_count(ms) |> should.equal(2)
 
   // "user_a" is still rate-limited at t=0
   func("user_a") |> should.equal("Stop!")
@@ -557,8 +557,6 @@ pub fn apply4_test() {
 }
 
 pub fn custom_max_idle_test() {
-  // burst_limit=100, per_second=1 with max_idle=120s
-  // At t=61s the bucket should NOT be evicted (threshold is 120s, not 60s)
   let assert Ok(limiter) =
     glimit.new()
     |> glimit.per_second(1)
@@ -572,27 +570,26 @@ pub fn custom_max_idle_test() {
     fn(_) { "OK" }
     |> glimit.apply_built(limiter)
 
+  let assert option.Some(ms) = limiter.memory_store
+
   rate_limiter.set_now(limiter.rate_limiter_actor, 0)
 
   // Exhaust all 100 tokens
   list.repeat(Nil, 100)
   |> list.each(fn(_) { func(Nil) |> ignore })
 
-  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(1)
+  memory_store.get_count(ms) |> should.equal(1)
 
   // At t=61_000: would be evicted with default 60s, but max_idle is 120s
-  rate_limiter.set_now(limiter.rate_limiter_actor, 61_000)
-  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
-  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(1)
+  let assert Ok(Nil) = memory_store.sweep(ms, 61_000, option.Some(120_000))
+  memory_store.get_count(ms) |> should.equal(1)
 
   // At t=121_000: now idle for 121s > 120s — evicted
-  rate_limiter.set_now(limiter.rate_limiter_actor, 121_000)
-  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
-  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(0)
+  let assert Ok(Nil) = memory_store.sweep(ms, 121_000, option.Some(120_000))
+  memory_store.get_count(ms) |> should.equal(0)
 }
 
 pub fn disabled_idle_eviction_test() {
-  // max_idle(0) disables idle eviction entirely
   let assert Ok(limiter) =
     glimit.new()
     |> glimit.per_second(1)
@@ -606,6 +603,8 @@ pub fn disabled_idle_eviction_test() {
     fn(_) { "OK" }
     |> glimit.apply_built(limiter)
 
+  let assert option.Some(ms) = limiter.memory_store
+
   rate_limiter.set_now(limiter.rate_limiter_actor, 0)
 
   // Exhaust all 100 tokens
@@ -614,13 +613,11 @@ pub fn disabled_idle_eviction_test() {
 
   // At t=61_000: bucket has 61 tokens (not full) and has been idle for >60s.
   // With default idle eviction this would be swept, but max_idle(0) disables it.
-  rate_limiter.set_now(limiter.rate_limiter_actor, 61_000)
-  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
-  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(1)
+  let assert Ok(Nil) = memory_store.sweep(ms, 61_000, option.None)
+  memory_store.get_count(ms) |> should.equal(1)
 }
 
 pub fn negative_max_idle_disables_eviction_test() {
-  // Negative values should disable idle eviction (same as 0)
   let assert Ok(limiter) =
     glimit.new()
     |> glimit.per_second(1)
@@ -634,15 +631,16 @@ pub fn negative_max_idle_disables_eviction_test() {
     fn(_) { "OK" }
     |> glimit.apply_built(limiter)
 
+  let assert option.Some(ms) = limiter.memory_store
+
   rate_limiter.set_now(limiter.rate_limiter_actor, 0)
 
   list.repeat(Nil, 100)
   |> list.each(fn(_) { func(Nil) |> ignore })
 
   // At t=61_000: idle for >60s but eviction is disabled
-  rate_limiter.set_now(limiter.rate_limiter_actor, 61_000)
-  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
-  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(1)
+  let assert Ok(Nil) = memory_store.sweep(ms, 61_000, option.None)
+  memory_store.get_count(ms) |> should.equal(1)
 }
 
 pub fn max_idle_overwrite_test() {
@@ -660,19 +658,19 @@ pub fn max_idle_overwrite_test() {
     fn(_) { "OK" }
     |> glimit.apply_built(limiter)
 
+  let assert option.Some(ms) = limiter.memory_store
+
   rate_limiter.set_now(limiter.rate_limiter_actor, 0)
   list.repeat(Nil, 100)
   |> list.each(fn(_) { func(Nil) |> ignore })
 
   // At t=61_000: idle 61s, but max_idle is 120s (last set value) — kept
-  rate_limiter.set_now(limiter.rate_limiter_actor, 61_000)
-  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
-  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(1)
+  let assert Ok(Nil) = memory_store.sweep(ms, 61_000, option.Some(120_000))
+  memory_store.get_count(ms) |> should.equal(1)
 
   // At t=121_000: idle 121s > 120s — evicted
-  rate_limiter.set_now(limiter.rate_limiter_actor, 121_000)
-  let assert Ok(Nil) = rate_limiter.sweep(limiter.rate_limiter_actor)
-  rate_limiter.get_count(limiter.rate_limiter_actor) |> should.equal(0)
+  let assert Ok(Nil) = memory_store.sweep(ms, 121_000, option.Some(120_000))
+  memory_store.get_count(ms) |> should.equal(0)
 }
 
 pub fn dead_rate_limiter_fails_open_test() {
@@ -703,8 +701,6 @@ pub fn dead_rate_limiter_fails_open_test() {
 }
 
 pub fn per_second_zero_fails_open_test() {
-  // per_second(0) is invalid — bucket creation fails at hit time,
-  // so the limiter fails open and the original function is called.
   let assert Ok(limiter) =
     glimit.new()
     |> glimit.per_second(0)
@@ -739,4 +735,195 @@ pub fn per_second_negative_fails_open_test() {
 
 fn ignore(_value: a) -> Nil {
   Nil
+}
+
+// ---------------------------------------------------------------------------
+// In-memory store for testing the pluggable store backend
+// ---------------------------------------------------------------------------
+
+type StoreMsg {
+  StoreGet(key: String, reply: Subject(Result(bucket.BucketState, Nil)))
+  StoreSet(
+    key: String,
+    state: bucket.BucketState,
+    ttl: Int,
+    reply: Subject(Nil),
+  )
+  StoreLock(key: String, reply: Subject(Bool))
+  StoreUnlock(key: String, reply: Subject(Nil))
+}
+
+type StoreState {
+  StoreState(
+    data: dict.Dict(String, bucket.BucketState),
+    locks: dict.Dict(String, Bool),
+  )
+}
+
+fn new_test_store() -> glimit.Store {
+  let assert Ok(started) =
+    actor.new_with_initialiser(1000, fn(self_subject) {
+      Ok(
+        actor.initialised(StoreState(data: dict.new(), locks: dict.new()))
+        |> actor.returning(self_subject),
+      )
+    })
+    |> actor.on_message(fn(state: StoreState, msg: StoreMsg) {
+      case msg {
+        StoreGet(key, reply) -> {
+          case dict.get(state.data, key) {
+            Ok(v) -> actor.send(reply, Ok(v))
+            Error(_) -> actor.send(reply, Error(Nil))
+          }
+          actor.continue(state)
+        }
+        StoreSet(key, bucket_state, _ttl, reply) -> {
+          let data = dict.insert(state.data, key, bucket_state)
+          actor.send(reply, Nil)
+          actor.continue(StoreState(..state, data: data))
+        }
+        StoreLock(key, reply) -> {
+          case dict.get(state.locks, key) {
+            Ok(True) -> {
+              actor.send(reply, False)
+              actor.continue(state)
+            }
+            _ -> {
+              let locks = dict.insert(state.locks, key, True)
+              actor.send(reply, True)
+              actor.continue(StoreState(..state, locks: locks))
+            }
+          }
+        }
+        StoreUnlock(key, reply) -> {
+          let locks = dict.delete(state.locks, key)
+          actor.send(reply, Nil)
+          actor.continue(StoreState(..state, locks: locks))
+        }
+      }
+    })
+    |> actor.start
+
+  let store_subject = started.data
+
+  bucket.Store(
+    get: fn(key) {
+      let reply: Subject(Result(bucket.BucketState, Nil)) =
+        process.new_subject()
+      process.send(store_subject, StoreGet(key, reply))
+      case process.receive(reply, 1000) {
+        Ok(Ok(v)) -> Ok(option.Some(v))
+        Ok(Error(_)) -> Ok(option.None)
+        Error(_) -> Error(Nil)
+      }
+    },
+    set: fn(key, state, ttl) {
+      let reply = process.new_subject()
+      process.send(store_subject, StoreSet(key, state, ttl, reply))
+      case process.receive(reply, 1000) {
+        Ok(_) -> Ok(Nil)
+        Error(_) -> Error(Nil)
+      }
+    },
+    lock: fn(key) {
+      let reply = process.new_subject()
+      process.send(store_subject, StoreLock(key, reply))
+      case process.receive(reply, 1000) {
+        Ok(True) -> Ok(Nil)
+        _ -> Error(Nil)
+      }
+    },
+    unlock: fn(key) {
+      let reply = process.new_subject()
+      process.send(store_subject, StoreUnlock(key, reply))
+      case process.receive(reply, 1000) {
+        Ok(_) -> Ok(Nil)
+        Error(_) -> Error(Nil)
+      }
+    },
+  )
+}
+
+pub fn store_basic_rate_limiting_test() {
+  let test_store = new_test_store()
+
+  let limiter =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.store(test_store)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+
+  let func =
+    fn(_) { "OK" }
+    |> glimit.apply(limiter)
+
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("Stop!")
+  func(Nil) |> should.equal("Stop!")
+}
+
+pub fn store_different_ids_test() {
+  let test_store = new_test_store()
+
+  let limiter =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.store(test_store)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+
+  let func =
+    fn(_) { "OK" }
+    |> glimit.apply(limiter)
+
+  func("a") |> should.equal("OK")
+  func("b") |> should.equal("OK")
+  func("b") |> should.equal("OK")
+  func("b") |> should.equal("Stop!")
+  func("a") |> should.equal("OK")
+  func("a") |> should.equal("Stop!")
+}
+
+pub fn store_burst_limit_test() {
+  let test_store = new_test_store()
+
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.burst_limit(3)
+    |> glimit.store(test_store)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let func =
+    fn(_) { "OK" }
+    |> glimit.apply_built(limiter)
+
+  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("Stop!")
+
+  // After 1 second, 1 token refills
+  rate_limiter.set_now(limiter.rate_limiter_actor, 1000)
+  func(Nil) |> should.equal("OK")
+  func(Nil) |> should.equal("Stop!")
+}
+
+pub fn bucket_to_pairs_from_pairs_roundtrip_test() {
+  let assert Ok(state) = bucket.new(10, 5)
+  let pairs = bucket.to_pairs(state)
+  let assert Ok(restored) = bucket.from_pairs(pairs)
+  restored.max_token_count |> should.equal(state.max_token_count)
+  restored.token_rate |> should.equal(state.token_rate)
+}
+
+pub fn bucket_from_pairs_missing_field_test() {
+  let pairs = [#("tc", "5.0"), #("lu", ""), #("mt", "10")]
+  // Missing "tr" field
+  bucket.from_pairs(pairs) |> should.be_error
 }

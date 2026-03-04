@@ -56,11 +56,10 @@ fn index_page() -> Response(ResponseData) {
     ]),
   ]
 
-  html_response(status: 200, body: layout(
-    title: "glimit + Lustre",
-    styles: styles,
-    content: content,
-  ))
+  html_response(
+    status: 200,
+    body: layout(title: "glimit + Lustre", styles: styles, content: content),
+  )
 }
 
 fn rate_limited_page() -> Response(ResponseData) {
@@ -73,15 +72,16 @@ fn rate_limited_page() -> Response(ResponseData) {
   let content = [
     html.h1([], [element.text("429 — Too Many Requests")]),
     html.p([], [
-      element.text("You've exceeded the rate limit. Wait a moment and try again."),
+      element.text(
+        "You've exceeded the rate limit. Wait a moment and try again.",
+      ),
     ]),
   ]
 
-  html_response(status: 429, body: layout(
-    title: "Rate Limited",
-    styles: styles,
-    content: content,
-  ))
+  html_response(
+    status: 429,
+    body: layout(title: "Rate Limited", styles: styles, content: content),
+  )
 }
 
 fn not_found_page() -> Response(ResponseData) {
@@ -96,11 +96,10 @@ fn not_found_page() -> Response(ResponseData) {
     html.p([], [element.text("The page you requested does not exist.")]),
   ]
 
-  html_response(status: 404, body: layout(
-    title: "Not Found",
-    styles: styles,
-    content: content,
-  ))
+  html_response(
+    status: 404,
+    body: layout(title: "Not Found", styles: styles, content: content),
+  )
 }
 
 fn handle_request(req: Request(Connection)) -> Response(ResponseData) {

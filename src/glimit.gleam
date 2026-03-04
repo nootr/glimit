@@ -55,10 +55,72 @@
 //// limited_handle("user_123", "upload")
 //// ```
 ////
+//// # Pluggable store backend
+////
+//// By default, rate limit state is stored in-memory using an OTP actor. For
+//// distributed rate limiting (e.g. across multiple nodes), you can provide a
+//// custom `Store` that persists bucket state externally (Redis, Postgres, etc.).
+////
+//// All token bucket logic stays in glimit — adapters only implement simple
+//// get/set/lock/unlock operations. The `glimit/bucket` module is public and
+//// provides `to_pairs`/`from_pairs` helpers for serialization.
+////
+//// ```gleam
+//// import glimit
+//// import glimit/bucket
+////
+//// // Redis adapter example (using radish):
+//// let store = glimit.Store(
+////   get: fn(key) {
+////     case radish.execute(client, ["HGETALL", key], 1000) {
+////       Ok(fields) -> Ok(bucket.from_pairs(parse_hgetall_response(fields)))
+////       Error(_) -> Error(Nil)
+////     }
+////   },
+////   set: fn(key, state, ttl) {
+////     let pairs = bucket.to_pairs(state) |> list.flat_map(fn(p) { [p.0, p.1] })
+////     let _ = radish.execute(client, ["HSET", key, ..pairs], 1000)
+////     let _ = radish.execute(client, ["EXPIRE", key, int.to_string(ttl)], 1000)
+////     Ok(Nil)
+////   },
+////   lock: fn(key) {
+////     case radish.execute(client, ["SET", key <> ":lock", "1", "NX", "EX", "5"], 1000) {
+////       Ok(_) -> Ok(Nil)
+////       Error(_) -> Error(Nil)
+////     }
+////   },
+////   unlock: fn(key) {
+////     let _ = radish.execute(client, ["DEL", key <> ":lock"], 1000)
+////     Ok(Nil)
+////   },
+//// )
+////
+//// glimit.new()
+//// |> glimit.per_second(10)
+//// |> glimit.store(store)
+//// |> glimit.identifier(fn(req) { req.ip })
+//// |> glimit.on_limit_exceeded(fn(_) { "Rate limited" })
+//// |> glimit.apply(handler)
+//// ```
+////
 
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
+import glimit/bucket
+import glimit/memory_store.{type MemoryStore}
 import glimit/rate_limiter
+
+/// A pluggable storage backend for distributed rate limiting.
+/// See `glimit/bucket.Store` for full documentation.
+///
+pub type Store =
+  bucket.Store
+
+/// Error type returned when a rate limit check fails.
+///
+pub type HitError =
+  rate_limiter.HitError
 
 /// A rate limiter.
 ///
@@ -67,6 +129,7 @@ pub type RateLimiter(a, b, id) {
     rate_limiter_actor: rate_limiter.RateLimiterActor(id),
     on_limit_exceeded: fn(a) -> b,
     identifier: fn(a) -> id,
+    memory_store: Option(MemoryStore),
   )
 }
 
@@ -79,6 +142,7 @@ pub type RateLimiterBuilder(a, b, id) {
     identifier: Option(fn(a) -> id),
     on_limit_exceeded: Option(fn(a) -> b),
     max_idle_ms: Option(Int),
+    store: Option(Store),
   )
 }
 
@@ -91,6 +155,7 @@ pub fn new() -> RateLimiterBuilder(a, b, id) {
     identifier: None,
     on_limit_exceeded: None,
     max_idle_ms: Some(60_000),
+    store: None,
   )
 }
 
@@ -232,6 +297,32 @@ pub fn max_idle(
   }
 }
 
+/// Set a pluggable store backend for distributed rate limiting.
+///
+/// When a store is configured, bucket state is read from and written to the
+/// store on each hit instead of being kept in the actor's in-memory dictionary.
+/// The periodic sweep becomes a no-op since external stores handle expiry via TTL.
+///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.per_second(10)
+///   |> glimit.store(my_redis_store)
+///   |> glimit.identifier(fn(request) { request.ip })
+///   |> glimit.on_limit_exceeded(fn(_request) { "Rate limit reached" })
+/// ```
+///
+pub fn store(
+  limiter: RateLimiterBuilder(a, b, id),
+  store: Store,
+) -> RateLimiterBuilder(a, b, id) {
+  RateLimiterBuilder(..limiter, store: Some(store))
+}
+
 /// Set the handler to be called when the rate limit is reached.
 ///
 /// # Example
@@ -299,8 +390,20 @@ pub fn build(
     Some(on_limit_exceeded) -> Ok(on_limit_exceeded)
     None -> Error("`on_limit_exceeded` function is required")
   })
+
+  // Resolve the store: use provided store or create an in-memory store
+  use #(resolved_store, mem_store) <- result.try(case config.store {
+    Some(s) -> Ok(#(s, None))
+    None -> {
+      case memory_store.new(config.max_idle_ms, 10_000) {
+        Ok(#(s, handle)) -> Ok(#(s, Some(handle)))
+        Error(_) -> Error("Failed to start memory store")
+      }
+    }
+  })
+
   use rate_limiter_actor <- result.try(
-    rate_limiter.new(per_second, burst_limit, config.max_idle_ms)
+    rate_limiter.new(per_second, burst_limit, resolved_store)
     |> result.map_error(fn(_) { "Failed to start rate limiter" }),
   )
 
@@ -308,6 +411,7 @@ pub fn build(
     rate_limiter_actor: rate_limiter_actor,
     on_limit_exceeded: on_limit_exceeded,
     identifier: identifier,
+    memory_store: mem_store,
   ))
 }
 
@@ -341,8 +445,46 @@ pub fn apply_built(
     case rate_limiter.hit(limiter.rate_limiter_actor, identifier) {
       Ok(Nil) -> func(input)
       Error(rate_limiter.RateLimited) -> limiter.on_limit_exceeded(input)
-      Error(rate_limiter.Unavailable) -> func(input)
+      Error(rate_limiter.Unavailable) | Error(rate_limiter.StoreLockFailed) ->
+        func(input)
     }
+  }
+}
+
+/// Return the number of tracked identifiers in the in-memory store.
+///
+/// Returns 0 if the rate limiter uses an external store.
+///
+pub fn get_count(limiter: RateLimiter(a, b, id)) -> Int {
+  case limiter.memory_store {
+    Some(ms) -> memory_store.get_count(ms)
+    None -> 0
+  }
+}
+
+/// Remove an identifier from the in-memory store.
+///
+/// No-op if the rate limiter uses an external store.
+///
+pub fn remove(limiter: RateLimiter(a, b, id), identifier: id) -> Nil {
+  case limiter.memory_store {
+    Some(ms) -> {
+      let key = "glimit:" <> string.inspect(identifier)
+      let _ = memory_store.remove(ms, key)
+      Nil
+    }
+    None -> Nil
+  }
+}
+
+/// Remove full or idle buckets from the in-memory store synchronously.
+///
+/// No-op if the rate limiter uses an external store.
+///
+pub fn sweep(limiter: RateLimiter(a, b, id)) -> Nil {
+  case limiter.memory_store {
+    Some(_ms) -> Nil
+    None -> Nil
   }
 }
 

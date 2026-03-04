@@ -61,3 +61,45 @@ jobs:
       - name: Stop server
         if: always()
         run: kill "$(cat /tmp/server.pid)" 2>/dev/null || true
+  examples-redis:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          gleam-version: "1.14.0"
+          rebar3-version: "3"
+      - run: gleam build
+        working-directory: examples/redis
+      - name: Start server
+        run: |
+          gleam run &
+          echo $! > /tmp/server.pid
+        working-directory: examples/redis
+      - name: Smoke test
+        run: |
+          curl --retry 5 --retry-connrefused --retry-delay 1 -sf http://localhost:8000/ | grep -q 'Hello, world!'
+      - name: Rate limit test
+        run: |
+          for i in $(seq 1 10); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/)
+            echo "Request $i: HTTP $CODE"
+          done
+          echo "$CODE" | grep -q "429"
+      - name: Verify state in Redis
+        run: |
+          docker exec ${{ job.services.redis.id }} redis-cli KEYS 'glimit:*' | grep -q 'glimit:'
+      - name: Stop server
+        if: always()
+        run: kill "$(cat /tmp/server.pid)" 2>/dev/null || true

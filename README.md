@@ -4,7 +4,7 @@
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/glimit/glimit.html)
 [![test](https://github.com/nootr/glimit/actions/workflows/test.yml/badge.svg)](https://github.com/nootr/glimit/actions/workflows/test.yml)
 
-A simple, framework-agnostic, in-memory rate limiter for Gleam. 💫
+A simple, framework-agnostic rate limiter for Gleam with pluggable storage. 💫
 
 
 ## Features
@@ -12,7 +12,8 @@ A simple, framework-agnostic, in-memory rate limiter for Gleam. 💫
 * ✨ Simple and easy to use.
 * 📏 Rate limits based on any key (e.g. IP address, or user ID).
 * 🪣 Uses a Token Bucket algorithm to rate limit requests.
-* 🗄️ No back-end service needed; stores rate limit stats in-memory.
+* 🗄️ Works out of the box with in-memory storage; no back-end service needed.
+* 🔌 Pluggable store backend for distributed rate limiting (e.g. Redis, Postgres).
 
 
 ## Usage
@@ -40,20 +41,29 @@ func("🚀") // "OK"
 func("🚀") // "Stop!"
 ```
 
-More practical examples can be found in the `examples/` directory, such as Wisp and Mist server examples.
+More practical examples can be found in the `examples/` directory, such as Wisp or Mist servers, or a Redis backend.
 
 
-## Constraints
+## Pluggable Store Backend
 
-While the in-memory rate limiter is simple and easy to use, it does have an important constraint: it is scoped to the BEAM VM cluster it runs in. This means that if your application is running across multiple BEAM VM clusters, the rate limiter will not be shared between them.
+By default, rate limit state is stored in-memory using an OTP actor. For distributed rate limiting across multiple nodes, you can provide a custom `Store` that persists bucket state in an external service like Redis or Postgres.
+
+All token bucket logic stays in glimit — adapters only implement simple get/set/lock/unlock operations. The `glimit/bucket` module provides `to_pairs`/`from_pairs` helpers for serialization.
+
+See `examples/redis/` for a complete Redis adapter using [valkyrie](https://hexdocs.pm/valkyrie/).
+
+
+## In-memory Mode
+
+When no store is configured, the rate limiter uses the default in-memory backend. This is simple and fast, but scoped to the BEAM VM cluster it runs in. If your application runs across multiple BEAM VM clusters, rate limits will not be shared between them.
 
 
 ## Performance
 
 All rate limiter state is held in a single OTP actor. Each hit is one message to this actor, which performs the token bucket calculation inline.
 
-* **Memory**: One dict entry per unique identifier. Idle identifiers (full token buckets) are automatically swept every 10 seconds.
-* **Fail-open**: If the rate limiter actor is unavailable, the request is allowed through rather than rejected.
+* **Memory** (in-memory mode): One dict entry per unique identifier. Idle identifiers (full token buckets) are automatically swept every 10 seconds.
+* **Fail-open**: If the rate limiter actor is unavailable or a store lock fails, the request is allowed through rather than rejected.
 
 
 ## Documentation
