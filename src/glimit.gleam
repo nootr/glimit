@@ -65,43 +65,8 @@
 //// get/set/lock/unlock operations. The `glimit/bucket` module is public and
 //// provides `to_pairs`/`from_pairs` helpers for serialization.
 ////
-//// ```gleam
-//// import glimit
-//// import glimit/bucket
-////
-//// // Redis adapter example (using radish):
-//// let store = glimit.Store(
-////   get: fn(key) {
-////     case radish.execute(client, ["HGETALL", key], 1000) {
-////       Ok(fields) -> Ok(bucket.from_pairs(parse_hgetall_response(fields)))
-////       Error(_) -> Error(Nil)
-////     }
-////   },
-////   set: fn(key, state, ttl) {
-////     let pairs = bucket.to_pairs(state) |> list.flat_map(fn(p) { [p.0, p.1] })
-////     let _ = radish.execute(client, ["HSET", key, ..pairs], 1000)
-////     let _ = radish.execute(client, ["EXPIRE", key, int.to_string(ttl)], 1000)
-////     Ok(Nil)
-////   },
-////   lock: fn(key) {
-////     case radish.execute(client, ["SET", key <> ":lock", "1", "NX", "EX", "5"], 1000) {
-////       Ok(_) -> Ok(Nil)
-////       Error(_) -> Error(Nil)
-////     }
-////   },
-////   unlock: fn(key) {
-////     let _ = radish.execute(client, ["DEL", key <> ":lock"], 1000)
-////     Ok(Nil)
-////   },
-//// )
-////
-//// glimit.new()
-//// |> glimit.per_second(10)
-//// |> glimit.store(store)
-//// |> glimit.identifier(fn(req) { req.ip })
-//// |> glimit.on_limit_exceeded(fn(_) { "Rate limited" })
-//// |> glimit.apply(handler)
-//// ```
+//// See `examples/redis/` for a complete Redis adapter using
+//// [valkyrie](https://hexdocs.pm/valkyrie/).
 ////
 
 import gleam/option.{type Option, None, Some}
