@@ -27,18 +27,18 @@ let limiter =
   glimit.new()
   |> glimit.per_second(2)
   |> glimit.identifier(fn(x) { x })
-  |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+  |> glimit.on_limit_exceeded(fn(_req) { "Too many requests" })
 
-let func =
-  fn(_) { "OK" }
+let handler =
+  fn(_req) { "Hello, world!" }
   |> glimit.apply(limiter)
 
-func("🚀") // "OK"
-func("💫") // "OK"
-func("💫") // "OK"
-func("💫") // "Stop!"
-func("🚀") // "OK"
-func("🚀") // "Stop!"
+handler("🚀") // "Hello, world!"
+handler("💫") // "Hello, world!"
+handler("💫") // "Hello, world!"
+handler("💫") // "Too many requests"
+handler("🚀") // "Hello, world!"
+handler("🚀") // "Too many requests"
 ```
 
 You can also use `glimit.build` and `glimit.hit` for direct rate limit checks
@@ -70,7 +70,7 @@ By default, rate limit state is stored in-memory using an OTP actor. For distrib
 
 All token bucket logic stays in glimit — adapters only implement `lock_and_get` / `set_and_unlock` / `unlock` operations. The `glimit/bucket` module provides `to_pairs`/`from_pairs` helpers for serialization.
 
-See `examples/redis/` for a complete Redis adapter using [valkyrie](https://hexdocs.pm/valkyrie/).
+See [`examples/redis/`](https://github.com/nootr/glimit/tree/main/examples/redis) for a complete Redis adapter using [valkyrie](https://hexdocs.pm/valkyrie/).
 
 
 ## In-memory Mode
