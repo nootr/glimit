@@ -1,12 +1,15 @@
 //// This module provides a rate limiter that can be used to limit the number of
 //// requests or function calls per second for a given identifier.
 ////
-//// A single rate limiter actor stores all token bucket state. Each hit is a single
-//// message to the rate limiter, which performs the Token Bucket calculation inline.
+//// In-memory mode: each hit sends two messages to an OTP actor (get + set).
 //// A periodic sweep removes full or idle buckets to reduce memory usage. The
 //// idle threshold defaults to 60 seconds and can be configured via `max_idle`.
-//// The rate limiter fails open — if the rate limiter actor is unavailable,
-//// requests are allowed through.
+////
+//// External store mode: each hit calls the store's lock_and_get/set_and_unlock
+//// interface directly, with no actor overhead.
+////
+//// The rate limiter fails open — if the store is unavailable, requests are
+//// allowed through.
 ////
 //// The rate limits are configured using the following two options:
 ////
@@ -61,9 +64,10 @@
 //// distributed rate limiting (e.g. across multiple nodes), you can provide a
 //// custom `Store` that persists bucket state externally (Redis, Postgres, etc.).
 ////
-//// All token bucket logic stays in glimit — adapters only implement simple
-//// get/set/lock/unlock operations. The `glimit/bucket` module is public and
-//// provides `to_pairs`/`from_pairs` helpers for serialization.
+//// All token bucket logic stays in glimit — adapters only implement
+//// `lock_and_get` / `set_and_unlock` / `unlock` operations. The `glimit/bucket`
+//// module is public and provides `to_pairs`/`from_pairs` helpers for
+//// serialization.
 ////
 //// See `examples/redis/` for a complete Redis adapter using
 //// [valkyrie](https://hexdocs.pm/valkyrie/).
@@ -74,7 +78,9 @@ import gleam/result
 import gleam/string
 import glimit/bucket
 import glimit/memory_store.{type MemoryStore}
-import glimit/rate_limiter
+import glimit/utils
+
+const store_key_prefix = "glimit:"
 
 /// A pluggable storage backend for distributed rate limiting.
 /// See `glimit/bucket.Store` for full documentation.
@@ -84,17 +90,26 @@ pub type Store =
 
 /// Error type returned when a rate limit check fails.
 ///
-pub type HitError =
-  rate_limiter.HitError
+pub type HitError {
+  /// The rate limit has been exceeded.
+  RateLimited
+  /// The rate limiter is unavailable.
+  Unavailable
+  /// The store lock could not be acquired (fails open).
+  StoreLockFailed
+}
 
 /// A rate limiter.
 ///
 pub type RateLimiter(a, b, id) {
   RateLimiter(
-    rate_limiter_actor: rate_limiter.RateLimiterActor(id),
     on_limit_exceeded: fn(a) -> b,
     identifier: fn(a) -> id,
+    per_second: fn(id) -> Int,
+    burst_limit: fn(id) -> Int,
+    store: Store,
     memory_store: Option(MemoryStore),
+    now: fn() -> Int,
   )
 }
 
@@ -265,8 +280,8 @@ pub fn max_idle(
 /// Set a pluggable store backend for distributed rate limiting.
 ///
 /// When a store is configured, bucket state is read from and written to the
-/// store on each hit instead of being kept in the actor's in-memory dictionary.
-/// The periodic sweep becomes a no-op since external stores handle expiry via TTL.
+/// store on each hit instead of being kept in memory.
+/// External stores handle expiry via TTL.
 ///
 /// # Example
 ///
@@ -327,6 +342,41 @@ pub fn identifier(
   RateLimiterBuilder(..limiter, identifier: Some(identifier))
 }
 
+fn string_key(identifier: id) -> String {
+  store_key_prefix <> string.inspect(identifier)
+}
+
+fn store_hit(
+  store: Store,
+  now: fn() -> Int,
+  key: String,
+  max_token_count: Int,
+  token_rate: Int,
+) -> Result(Nil, HitError) {
+  use maybe_bucket <- result.try(
+    store.lock_and_get(key) |> result.replace_error(StoreLockFailed),
+  )
+  let b = case maybe_bucket {
+    Some(b) -> Ok(b)
+    None -> bucket.new(max_token_count, token_rate)
+  }
+  case b {
+    Error(_) -> {
+      let _ = store.unlock(key)
+      Error(Unavailable)
+    }
+    Ok(b) -> {
+      let #(hit_result, new_b) = bucket.hit(b, now())
+      let ttl = bucket.compute_ttl(new_b)
+      let _ = store.set_and_unlock(key, new_b, ttl)
+      case hit_result {
+        Ok(Nil) -> Ok(Nil)
+        Error(Nil) -> Error(RateLimited)
+      }
+    }
+  }
+}
+
 /// Build the rate limiter.
 ///
 /// Note that using `apply` will already build the rate limiter, so this function is
@@ -356,28 +406,41 @@ pub fn build(
     None -> Error("`on_limit_exceeded` function is required")
   })
 
-  // Resolve the store: use provided store or create an in-memory store
-  use #(resolved_store, mem_store) <- result.try(case config.store {
-    Some(s) -> Ok(#(s, None))
-    None -> {
+  use #(store, ms) <- result.try(case config.store {
+    Some(ext_store) -> Ok(#(ext_store, None))
+    None ->
       case memory_store.new(config.max_idle_ms, 10_000) {
-        Ok(#(s, handle)) -> Ok(#(s, Some(handle)))
+        Ok(handle) -> Ok(#(memory_store.make_store(handle), Some(handle)))
         Error(_) -> Error("Failed to start memory store")
       }
-    }
   })
 
-  use rate_limiter_actor <- result.try(
-    rate_limiter.new(per_second, burst_limit, resolved_store)
-    |> result.map_error(fn(_) { "Failed to start rate limiter" }),
-  )
-
   Ok(RateLimiter(
-    rate_limiter_actor: rate_limiter_actor,
     on_limit_exceeded: on_limit_exceeded,
     identifier: identifier,
-    memory_store: mem_store,
+    per_second: per_second,
+    burst_limit: burst_limit,
+    store: store,
+    memory_store: ms,
+    now: utils.now,
   ))
+}
+
+/// Hit the rate limiter for the given identifier directly.
+///
+pub fn hit(
+  limiter: RateLimiter(a, b, id),
+  identifier: id,
+) -> Result(Nil, HitError) {
+  let key = string_key(identifier)
+  case utils.rescue(fn() { limiter.burst_limit(identifier) }) {
+    Error(_) -> Error(Unavailable)
+    Ok(max) ->
+      case utils.rescue(fn() { limiter.per_second(identifier) }) {
+        Error(_) -> Error(Unavailable)
+        Ok(rate) -> store_hit(limiter.store, limiter.now, key, max, rate)
+      }
+  }
 }
 
 /// Apply the rate limiter to a request handler or function.
@@ -407,11 +470,10 @@ pub fn apply_built(
 ) -> fn(a) -> b {
   fn(input: a) -> b {
     let identifier = limiter.identifier(input)
-    case rate_limiter.hit(limiter.rate_limiter_actor, identifier) {
+    case hit(limiter, identifier) {
       Ok(Nil) -> func(input)
-      Error(rate_limiter.RateLimited) -> limiter.on_limit_exceeded(input)
-      Error(rate_limiter.Unavailable) | Error(rate_limiter.StoreLockFailed) ->
-        func(input)
+      Error(RateLimited) -> limiter.on_limit_exceeded(input)
+      Error(Unavailable) | Error(StoreLockFailed) -> func(input)
     }
   }
 }
@@ -434,21 +496,10 @@ pub fn get_count(limiter: RateLimiter(a, b, id)) -> Int {
 pub fn remove(limiter: RateLimiter(a, b, id), identifier: id) -> Nil {
   case limiter.memory_store {
     Some(ms) -> {
-      let key = "glimit:" <> string.inspect(identifier)
+      let key = string_key(identifier)
       let _ = memory_store.remove(ms, key)
       Nil
     }
-    None -> Nil
-  }
-}
-
-/// Remove full or idle buckets from the in-memory store synchronously.
-///
-/// No-op if the rate limiter uses an external store.
-///
-pub fn sweep(limiter: RateLimiter(a, b, id)) -> Nil {
-  case limiter.memory_store {
-    Some(_ms) -> Nil
     None -> Nil
   }
 }

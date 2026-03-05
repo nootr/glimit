@@ -41,6 +41,26 @@ func("🚀") // "OK"
 func("🚀") // "Stop!"
 ```
 
+You can also use `glimit.build` and `glimit.hit` for direct rate limit checks
+without wrapping a function:
+
+```gleam
+import glimit
+
+let assert Ok(limiter) =
+  glimit.new()
+  |> glimit.per_second(10)
+  |> glimit.identifier(fn(x) { x })
+  |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+  |> glimit.build
+
+case glimit.hit(limiter, "user_123") {
+  Ok(Nil) -> // allowed
+  Error(glimit.RateLimited) -> // rejected
+  Error(_) -> // store unavailable, fails open
+}
+```
+
 More practical examples can be found in the `examples/` directory, such as Wisp or Mist servers, or a Redis backend.
 
 
@@ -48,7 +68,7 @@ More practical examples can be found in the `examples/` directory, such as Wisp 
 
 By default, rate limit state is stored in-memory using an OTP actor. For distributed rate limiting across multiple nodes, you can provide a custom `Store` that persists bucket state in an external service like Redis or Postgres.
 
-All token bucket logic stays in glimit — adapters only implement simple get/set/lock/unlock operations. The `glimit/bucket` module provides `to_pairs`/`from_pairs` helpers for serialization.
+All token bucket logic stays in glimit — adapters only implement `lock_and_get` / `set_and_unlock` / `unlock` operations. The `glimit/bucket` module provides `to_pairs`/`from_pairs` helpers for serialization.
 
 See `examples/redis/` for a complete Redis adapter using [valkyrie](https://hexdocs.pm/valkyrie/).
 
@@ -60,10 +80,10 @@ When no store is configured, the rate limiter uses the default in-memory backend
 
 ## Performance
 
-All rate limiter state is held in a single OTP actor. Each hit is one message to this actor, which performs the token bucket calculation inline.
+Every hit goes through the pluggable `Store` interface (`lock_and_get` / `set_and_unlock`). In-memory mode backs this with an OTP actor (two messages per hit); external store mode calls the adapter directly.
 
-* **Memory** (in-memory mode): One dict entry per unique identifier. Idle identifiers (full token buckets) are automatically swept every 10 seconds.
-* **Fail-open**: If the rate limiter actor is unavailable or a store lock fails, the request is allowed through rather than rejected.
+* **Memory** (in-memory mode): One dict entry per unique identifier. Full and idle buckets are automatically swept every 10 seconds.
+* **Fail-open**: If the store is unavailable or a lock cannot be acquired, the request is allowed through rather than rejected.
 
 
 ## Documentation

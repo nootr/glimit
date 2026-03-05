@@ -23,51 +23,67 @@ fn resp_to_string(value: resp.Value) -> Result(String, Nil) {
 }
 
 fn redis_store(conn: valkyrie.Connection) -> glimit.Store {
-  bucket.Store(
-    get: fn(key) {
-      case valkyrie.hgetall(conn, key, redis_timeout) {
-        Ok(fields) -> {
-          let pairs =
-            dict.to_list(fields)
-            |> list.filter_map(fn(p) {
-              use k <- result.try(resp_to_string(p.0))
-              use v <- result.try(resp_to_string(p.1))
-              Ok(#(k, v))
-            })
-          case bucket.from_pairs(pairs) {
-            Ok(state) -> Ok(Some(state))
-            _ -> Ok(None)
-          }
+  let lock = fn(key) {
+    let opts =
+      valkyrie.SetOptions(
+        existence_condition: Some(valkyrie.IfNotExists),
+        return_old: False,
+        expiry_option: Some(valkyrie.ExpirySeconds(5)),
+      )
+    case valkyrie.set(conn, key <> ":lock", "1", Some(opts), redis_timeout) {
+      Ok(_) -> Ok(Nil)
+      Error(_) -> Error(Nil)
+    }
+  }
+
+  let get = fn(key) {
+    case valkyrie.hgetall(conn, key, redis_timeout) {
+      Ok(fields) -> {
+        let pairs =
+          dict.to_list(fields)
+          |> list.filter_map(fn(p) {
+            use k <- result.try(resp_to_string(p.0))
+            use v <- result.try(resp_to_string(p.1))
+            Ok(#(k, v))
+          })
+        case bucket.from_pairs(pairs) {
+          Ok(state) -> Ok(Some(state))
+          _ -> Ok(None)
         }
-        Error(_) -> Error(Nil)
+      }
+      Error(_) -> Error(Nil)
+    }
+  }
+
+  let unlock = fn(key) {
+    let _ = valkyrie.del(conn, [key <> ":lock"], redis_timeout)
+    Ok(Nil)
+  }
+
+  bucket.Store(
+    lock_and_get: fn(key) {
+      use _ <- result.try(lock(key))
+      case get(key) {
+        Ok(result) -> Ok(result)
+        Error(_) -> {
+          let _ = unlock(key)
+          Error(Nil)
+        }
       }
     },
-    set: fn(key, state, ttl) {
+    set_and_unlock: fn(key, state, ttl) {
       let fields = bucket.to_pairs(state) |> dict.from_list
-      case valkyrie.hset(conn, key, fields, redis_timeout) {
+      let result = case valkyrie.hset(conn, key, fields, redis_timeout) {
         Ok(_) -> {
           let _ = valkyrie.expire(conn, key, ttl, None, redis_timeout)
           Ok(Nil)
         }
         Error(_) -> Error(Nil)
       }
+      let _ = unlock(key)
+      result
     },
-    lock: fn(key) {
-      let opts =
-        valkyrie.SetOptions(
-          existence_condition: Some(valkyrie.IfNotExists),
-          return_old: False,
-          expiry_option: Some(valkyrie.ExpirySeconds(5)),
-        )
-      case valkyrie.set(conn, key <> ":lock", "1", Some(opts), redis_timeout) {
-        Ok(_) -> Ok(Nil)
-        Error(_) -> Error(Nil)
-      }
-    },
-    unlock: fn(key) {
-      let _ = valkyrie.del(conn, [key <> ":lock"], redis_timeout)
-      Ok(Nil)
-    },
+    unlock: unlock,
   )
 }
 

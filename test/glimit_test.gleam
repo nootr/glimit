@@ -8,7 +8,6 @@ import gleeunit/should
 import glimit
 import glimit/bucket
 import glimit/memory_store
-import glimit/rate_limiter
 
 pub fn main() {
   gleeunit.main()
@@ -59,41 +58,32 @@ pub fn burst_limit_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  let func =
-    fn(_) { "OK" }
-    |> glimit.apply_built(limiter)
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("Stop!")
-  func(Nil) |> should.equal("Stop!")
+  let limiter = set_now(limiter, 1000)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 1000)
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("Stop!")
-  func(Nil) |> should.equal("Stop!")
+  let limiter = set_now(limiter, 3000)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 3000)
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("Stop!")
-  func(Nil) |> should.equal("Stop!")
+  let limiter = set_now(limiter, 6000)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 6000)
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("Stop!")
-  func(Nil) |> should.equal("Stop!")
-
-  rate_limiter.set_now(limiter.rate_limiter_actor, 13_000)
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("Stop!")
-  func(Nil) |> should.equal("Stop!")
+  let limiter = set_now(limiter, 13_000)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 }
 
 pub fn dynamic_per_second_test() {
@@ -136,34 +126,26 @@ pub fn dynamic_per_second_static_burst_limit_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  let func =
-    fn(_) { "OK" }
-    |> glimit.apply_built(limiter)
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("Stop!")
-  func("id") |> should.equal("Stop!")
+  let limiter = set_now(limiter, 1000)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 1000)
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("Stop!")
-  func("id") |> should.equal("Stop!")
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "other") |> should.be_ok
+  glimit.hit(limiter, "other") |> should.be_ok
+  glimit.hit(limiter, "other") |> should.be_ok
+  glimit.hit(limiter, "other") |> should.equal(Error(glimit.RateLimited))
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
-  func("other") |> should.equal("OK")
-  func("other") |> should.equal("OK")
-  func("other") |> should.equal("OK")
-  func("other") |> should.equal("Stop!")
-  func("other") |> should.equal("Stop!")
-
-  rate_limiter.set_now(limiter.rate_limiter_actor, 1000)
-  func("other") |> should.equal("OK")
-  func("other") |> should.equal("Stop!")
-  func("other") |> should.equal("Stop!")
+  let limiter = set_now(limiter, 1000)
+  glimit.hit(limiter, "other") |> should.be_ok
+  glimit.hit(limiter, "other") |> should.equal(Error(glimit.RateLimited))
 }
 
 pub fn static_per_second_dynamic_burst_limit_test() {
@@ -180,32 +162,24 @@ pub fn static_per_second_dynamic_burst_limit_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  let func =
-    fn(_) { "OK" }
-    |> glimit.apply_built(limiter)
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("Stop!")
-  func("id") |> should.equal("Stop!")
+  let limiter = set_now(limiter, 1000)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 1000)
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("Stop!")
-  func("id") |> should.equal("Stop!")
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "other") |> should.be_ok
+  glimit.hit(limiter, "other") |> should.be_ok
+  glimit.hit(limiter, "other") |> should.equal(Error(glimit.RateLimited))
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
-  func("other") |> should.equal("OK")
-  func("other") |> should.equal("OK")
-  func("other") |> should.equal("Stop!")
-  func("other") |> should.equal("Stop!")
-
-  rate_limiter.set_now(limiter.rate_limiter_actor, 1000)
-  func("other") |> should.equal("OK")
-  func("other") |> should.equal("Stop!")
-  func("other") |> should.equal("Stop!")
+  let limiter = set_now(limiter, 1000)
+  glimit.hit(limiter, "other") |> should.be_ok
+  glimit.hit(limiter, "other") |> should.equal(Error(glimit.RateLimited))
 }
 
 pub fn dynamic_per_second_dynamic_burst_limit_test() {
@@ -227,35 +201,27 @@ pub fn dynamic_per_second_dynamic_burst_limit_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  let func =
-    fn(_) { "OK" }
-    |> glimit.apply_built(limiter)
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("Stop!")
-  func("id") |> should.equal("Stop!")
+  let limiter = set_now(limiter, 1000)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 1000)
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("OK")
-  func("id") |> should.equal("Stop!")
-  func("id") |> should.equal("Stop!")
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "other") |> should.be_ok
+  glimit.hit(limiter, "other") |> should.be_ok
+  glimit.hit(limiter, "other") |> should.be_ok
+  glimit.hit(limiter, "other") |> should.equal(Error(glimit.RateLimited))
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
-  func("other") |> should.equal("OK")
-  func("other") |> should.equal("OK")
-  func("other") |> should.equal("OK")
-  func("other") |> should.equal("Stop!")
-  func("other") |> should.equal("Stop!")
-
-  rate_limiter.set_now(limiter.rate_limiter_actor, 1000)
-  func("other") |> should.equal("OK")
-  func("other") |> should.equal("Stop!")
-  func("other") |> should.equal("Stop!")
+  let limiter = set_now(limiter, 1000)
+  glimit.hit(limiter, "other") |> should.be_ok
+  glimit.hit(limiter, "other") |> should.equal(Error(glimit.RateLimited))
 }
 
 pub fn sweep_preserves_active_limiters_test() {
@@ -266,18 +232,13 @@ pub fn sweep_preserves_active_limiters_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  let func =
-    fn(_) { "OK" }
-    |> glimit.apply_built(limiter)
-
   let assert option.Some(ms) = limiter.memory_store
-
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
+  let limiter = set_now(limiter, 0)
 
   // Hit "user_a" once — active, not full
-  func("user_a") |> should.equal("OK")
-  func("user_b") |> should.equal("OK")
-  func("user_b") |> should.equal("OK")
+  glimit.hit(limiter, "user_a") |> should.be_ok
+  glimit.hit(limiter, "user_b") |> should.be_ok
+  glimit.hit(limiter, "user_b") |> should.be_ok
 
   let assert Ok(Nil) = memory_store.sweep(ms, 0, option.Some(60_000))
 
@@ -285,8 +246,8 @@ pub fn sweep_preserves_active_limiters_test() {
   memory_store.get_count(ms) |> should.equal(2)
 
   // user_a still has 1 token left
-  func("user_a") |> should.equal("OK")
-  func("user_a") |> should.equal("Stop!")
+  glimit.hit(limiter, "user_a") |> should.be_ok
+  glimit.hit(limiter, "user_a") |> should.equal(Error(glimit.RateLimited))
 }
 
 pub fn integration_many_identifiers_test() {
@@ -298,13 +259,8 @@ pub fn integration_many_identifiers_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  let func =
-    fn(_) { "OK" }
-    |> glimit.apply_built(limiter)
-
   let assert option.Some(ms) = limiter.memory_store
-
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
+  let limiter = set_now(limiter, 0)
 
   let ids = [
     "id_0", "id_1", "id_2", "id_3", "id_4", "id_5", "id_6", "id_7", "id_8",
@@ -314,7 +270,7 @@ pub fn integration_many_identifiers_test() {
   // Hit each ID i times (id_0: 0 hits, id_1: 1 hit, etc.)
   list.index_map(ids, fn(id, i) {
     list.repeat(Nil, i)
-    |> list.each(fn(_) { func(id) |> ignore })
+    |> list.each(fn(_) { glimit.hit(limiter, id) |> ignore })
   })
 
   // id_0 was never hit so doesn't exist
@@ -337,21 +293,16 @@ pub fn integration_sweep_then_reuse_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  let func =
-    fn(_) { "OK" }
-    |> glimit.apply_built(limiter)
-
   let assert option.Some(ms) = limiter.memory_store
-
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
+  let limiter = set_now(limiter, 0)
 
   // Exhaust "user_a" (all tokens used)
-  func("user_a") |> should.equal("OK")
-  func("user_a") |> should.equal("OK")
-  func("user_a") |> should.equal("Stop!")
+  glimit.hit(limiter, "user_a") |> should.be_ok
+  glimit.hit(limiter, "user_a") |> should.be_ok
+  glimit.hit(limiter, "user_a") |> should.equal(Error(glimit.RateLimited))
 
   // Hit "user_b" once
-  func("user_b") |> should.equal("OK")
+  glimit.hit(limiter, "user_b") |> should.be_ok
 
   let assert Ok(Nil) = memory_store.sweep(ms, 0, option.Some(60_000))
 
@@ -359,13 +310,13 @@ pub fn integration_sweep_then_reuse_test() {
   memory_store.get_count(ms) |> should.equal(2)
 
   // "user_a" is still rate-limited at t=0
-  func("user_a") |> should.equal("Stop!")
+  glimit.hit(limiter, "user_a") |> should.equal(Error(glimit.RateLimited))
 
   // Advance time so user_a gets tokens back
-  rate_limiter.set_now(limiter.rate_limiter_actor, 1000)
-  func("user_a") |> should.equal("OK")
-  func("user_a") |> should.equal("OK")
-  func("user_a") |> should.equal("Stop!")
+  let limiter = set_now(limiter, 1000)
+  glimit.hit(limiter, "user_a") |> should.be_ok
+  glimit.hit(limiter, "user_a") |> should.be_ok
+  glimit.hit(limiter, "user_a") |> should.equal(Error(glimit.RateLimited))
 }
 
 pub fn sub_second_remainder_preservation_test() {
@@ -378,38 +329,36 @@ pub fn sub_second_remainder_preservation_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  let reg = limiter.rate_limiter_actor
-
   // Consume all 10 tokens at t=0
-  rate_limiter.set_now(reg, 0)
+  let limiter = set_now(limiter, 0)
   list.repeat(Nil, 10)
-  |> list.each(fn(_) { rate_limiter.hit(reg, "id") |> ignore })
-  rate_limiter.hit(reg, "id") |> should.equal(Error(rate_limiter.RateLimited))
+  |> list.each(fn(_) { glimit.hit(limiter, "id") |> ignore })
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
   // 400ms: tc = 0.0 + 2.0 * 400 / 1000 = 0.8 < 1.0 — still rate limited
-  rate_limiter.set_now(reg, 400)
-  rate_limiter.hit(reg, "id") |> should.equal(Error(rate_limiter.RateLimited))
+  let limiter = set_now(limiter, 400)
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
   // 500ms: tc = 0.8 + 2.0 * 100 / 1000 = 1.0 >= 1.0 — succeeds
-  rate_limiter.set_now(reg, 500)
-  rate_limiter.hit(reg, "id") |> should.be_ok
-  rate_limiter.hit(reg, "id") |> should.equal(Error(rate_limiter.RateLimited))
+  let limiter = set_now(limiter, 500)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
   // 900ms: tc = 0.0 + 2.0 * 400 / 1000 = 0.8 < 1.0
-  rate_limiter.set_now(reg, 900)
-  rate_limiter.hit(reg, "id") |> should.equal(Error(rate_limiter.RateLimited))
+  let limiter = set_now(limiter, 900)
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
   // 1000ms: tc = 0.8 + 2.0 * 100 / 1000 = 1.0 >= 1.0
-  rate_limiter.set_now(reg, 1000)
-  rate_limiter.hit(reg, "id") |> should.be_ok
-  rate_limiter.hit(reg, "id") |> should.equal(Error(rate_limiter.RateLimited))
+  let limiter = set_now(limiter, 1000)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
   // 2500ms: tc = 0.0 + 2.0 * 1500 / 1000 = 3.0 — 3 tokens
-  rate_limiter.set_now(reg, 2500)
-  rate_limiter.hit(reg, "id") |> should.be_ok
-  rate_limiter.hit(reg, "id") |> should.be_ok
-  rate_limiter.hit(reg, "id") |> should.be_ok
-  rate_limiter.hit(reg, "id") |> should.equal(Error(rate_limiter.RateLimited))
+  let limiter = set_now(limiter, 2500)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 }
 
 pub fn sub_second_remainder_non_divisible_rate_test() {
@@ -422,40 +371,38 @@ pub fn sub_second_remainder_non_divisible_rate_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  let reg = limiter.rate_limiter_actor
-
   // Drain all 5 tokens at t=0
-  rate_limiter.set_now(reg, 0)
+  let limiter = set_now(limiter, 0)
   list.repeat(Nil, 5)
-  |> list.each(fn(_) { rate_limiter.hit(reg, "id") |> ignore })
-  rate_limiter.hit(reg, "id") |> should.equal(Error(rate_limiter.RateLimited))
+  |> list.each(fn(_) { glimit.hit(limiter, "id") |> ignore })
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
   // 333ms: tc = 0.0 + 3.0 * 333 / 1000 = 0.999 < 1.0
-  rate_limiter.set_now(reg, 333)
-  rate_limiter.hit(reg, "id") |> should.equal(Error(rate_limiter.RateLimited))
+  let limiter = set_now(limiter, 333)
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
   // 334ms: tc = 0.999 + 3.0 * 1 / 1000 = 1.002 >= 1.0 — succeeds
-  rate_limiter.set_now(reg, 334)
-  rate_limiter.hit(reg, "id") |> should.be_ok
-  rate_limiter.hit(reg, "id") |> should.equal(Error(rate_limiter.RateLimited))
+  let limiter = set_now(limiter, 334)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
   // 666ms: tc = 0.002 + 3.0 * 332 / 1000 = 0.998 < 1.0
-  rate_limiter.set_now(reg, 666)
-  rate_limiter.hit(reg, "id") |> should.equal(Error(rate_limiter.RateLimited))
+  let limiter = set_now(limiter, 666)
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
   // 667ms: tc = 0.998 + 3.0 * 1 / 1000 = 1.001 >= 1.0 — succeeds
-  rate_limiter.set_now(reg, 667)
-  rate_limiter.hit(reg, "id") |> should.be_ok
-  rate_limiter.hit(reg, "id") |> should.equal(Error(rate_limiter.RateLimited))
+  let limiter = set_now(limiter, 667)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
   // 3000ms: tc = 0.001 + 3.0 * 2333 / 1000 = 7.0, capped at burst limit 5
-  rate_limiter.set_now(reg, 3000)
-  rate_limiter.hit(reg, "id") |> should.be_ok
-  rate_limiter.hit(reg, "id") |> should.be_ok
-  rate_limiter.hit(reg, "id") |> should.be_ok
-  rate_limiter.hit(reg, "id") |> should.be_ok
-  rate_limiter.hit(reg, "id") |> should.be_ok
-  rate_limiter.hit(reg, "id") |> should.equal(Error(rate_limiter.RateLimited))
+  let limiter = set_now(limiter, 3000)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 }
 
 pub fn build_missing_per_second_test() {
@@ -492,21 +439,16 @@ pub fn builder_overwrite_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  let func =
-    fn(_) { "OK" }
-    |> glimit.apply_built(limiter)
-
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
+  let limiter = set_now(limiter, 0)
   // burst_limit=2: two hits succeed, third is limited
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("OK")
-  // on_limit_exceeded returns "Stop!" (not "wrong")
-  func(Nil) |> should.equal("Stop!")
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 
   // Advance 1 second — per_second=1 so only 1 token refilled (not 999)
-  rate_limiter.set_now(limiter.rate_limiter_actor, 1000)
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("Stop!")
+  let limiter = set_now(limiter, 1000)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 }
 
 pub fn apply2_test() {
@@ -566,17 +508,12 @@ pub fn custom_max_idle_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  let func =
-    fn(_) { "OK" }
-    |> glimit.apply_built(limiter)
-
   let assert option.Some(ms) = limiter.memory_store
-
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
+  let limiter = set_now(limiter, 0)
 
   // Exhaust all 100 tokens
   list.repeat(Nil, 100)
-  |> list.each(fn(_) { func(Nil) |> ignore })
+  |> list.each(fn(_) { glimit.hit(limiter, "id") |> ignore })
 
   memory_store.get_count(ms) |> should.equal(1)
 
@@ -599,17 +536,12 @@ pub fn disabled_idle_eviction_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  let func =
-    fn(_) { "OK" }
-    |> glimit.apply_built(limiter)
-
   let assert option.Some(ms) = limiter.memory_store
-
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
+  let limiter = set_now(limiter, 0)
 
   // Exhaust all 100 tokens
   list.repeat(Nil, 100)
-  |> list.each(fn(_) { func(Nil) |> ignore })
+  |> list.each(fn(_) { glimit.hit(limiter, "id") |> ignore })
 
   // At t=61_000: bucket has 61 tokens (not full) and has been idle for >60s.
   // With default idle eviction this would be swept, but max_idle(0) disables it.
@@ -627,16 +559,11 @@ pub fn negative_max_idle_disables_eviction_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  let func =
-    fn(_) { "OK" }
-    |> glimit.apply_built(limiter)
-
   let assert option.Some(ms) = limiter.memory_store
-
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
+  let limiter = set_now(limiter, 0)
 
   list.repeat(Nil, 100)
-  |> list.each(fn(_) { func(Nil) |> ignore })
+  |> list.each(fn(_) { glimit.hit(limiter, "id") |> ignore })
 
   // At t=61_000: idle for >60s but eviction is disabled
   let assert Ok(Nil) = memory_store.sweep(ms, 61_000, option.None)
@@ -654,15 +581,11 @@ pub fn max_idle_overwrite_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  let func =
-    fn(_) { "OK" }
-    |> glimit.apply_built(limiter)
-
   let assert option.Some(ms) = limiter.memory_store
+  let limiter = set_now(limiter, 0)
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
   list.repeat(Nil, 100)
-  |> list.each(fn(_) { func(Nil) |> ignore })
+  |> list.each(fn(_) { glimit.hit(limiter, "id") |> ignore })
 
   // At t=61_000: idle 61s, but max_idle is 120s (last set value) — kept
   let assert Ok(Nil) = memory_store.sweep(ms, 61_000, option.Some(120_000))
@@ -673,7 +596,7 @@ pub fn max_idle_overwrite_test() {
   memory_store.get_count(ms) |> should.equal(0)
 }
 
-pub fn dead_rate_limiter_fails_open_test() {
+pub fn dead_memory_store_fails_open_test() {
   let assert Ok(limiter) =
     glimit.new()
     |> glimit.per_second(2)
@@ -691,8 +614,9 @@ pub fn dead_rate_limiter_fails_open_test() {
   // Trap exits so the kill signal doesn't crash the test process
   let _trapped = process.trap_exits(True)
 
-  // Kill the rate limiter actor
-  let assert Ok(pid) = process.subject_owner(limiter.rate_limiter_actor)
+  // Kill the memory store actor
+  let assert option.Some(ms) = limiter.memory_store
+  let assert Ok(pid) = memory_store.pid(ms)
   process.kill(pid)
   process.sleep(10)
 
@@ -733,8 +657,493 @@ pub fn per_second_negative_fails_open_test() {
   func(Nil) |> should.equal("OK")
 }
 
+// Tests merged from glimit_rate_limiter_test
+
+pub fn hit_returns_ok_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(limiter, "a") |> should.be_ok
+}
+
+pub fn hit_rate_limited_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.equal(Error(glimit.RateLimited))
+}
+
+pub fn hit_different_ids_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.burst_limit(1)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "b") |> should.be_ok
+  glimit.hit(limiter, "b") |> should.equal(Error(glimit.RateLimited))
+}
+
+pub fn get_count_empty_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.get_count(limiter) |> should.equal(0)
+}
+
+pub fn get_count_after_hits_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "b") |> should.be_ok
+  glimit.get_count(limiter) |> should.equal(2)
+}
+
+pub fn same_id_same_count_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.get_count(limiter) |> should.equal(1)
+}
+
+pub fn sweep_full_bucket_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let assert option.Some(ms) = limiter.memory_store
+  let limiter = set_now(limiter, 0)
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  let assert Ok(Nil) = memory_store.sweep(ms, 1_000_000, option.Some(60_000))
+  memory_store.get_count(ms) |> should.equal(0)
+}
+
+pub fn sweep_not_full_bucket_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let assert option.Some(ms) = limiter.memory_store
+  let limiter = set_now(limiter, 0)
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  let assert Ok(Nil) = memory_store.sweep(ms, 0, option.Some(60_000))
+  memory_store.get_count(ms) |> should.equal(1)
+}
+
+pub fn sweep_after_long_time_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let assert option.Some(ms) = limiter.memory_store
+  let limiter = set_now(limiter, 0)
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.equal(Error(glimit.RateLimited))
+
+  let assert Ok(Nil) = memory_store.sweep(ms, 1_000_000, option.Some(60_000))
+  memory_store.get_count(ms) |> should.equal(0)
+}
+
+pub fn sweep_empty_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let assert option.Some(ms) = limiter.memory_store
+  let assert Ok(Nil) = memory_store.sweep(ms, 0, option.Some(60_000))
+}
+
+pub fn sweep_mixed_buckets_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let assert option.Some(ms) = limiter.memory_store
+  let limiter = set_now(limiter, 0)
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "b") |> should.be_ok
+  glimit.hit(limiter, "c") |> should.be_ok
+  glimit.hit(limiter, "c") |> should.be_ok
+
+  let assert Ok(Nil) = memory_store.sweep(ms, 1_000_000, option.Some(60_000))
+  memory_store.get_count(ms) |> should.equal(0)
+}
+
+pub fn sweep_keeps_active_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let assert option.Some(ms) = limiter.memory_store
+  let limiter = set_now(limiter, 0)
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  let assert Ok(Nil) = memory_store.sweep(ms, 0, option.Some(60_000))
+  memory_store.get_count(ms) |> should.equal(1)
+}
+
+pub fn sweep_all_active_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let assert option.Some(ms) = limiter.memory_store
+  let limiter = set_now(limiter, 0)
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "b") |> should.be_ok
+  glimit.hit(limiter, "c") |> should.be_ok
+  let assert Ok(Nil) = memory_store.sweep(ms, 0, option.Some(60_000))
+  memory_store.get_count(ms) |> should.equal(3)
+}
+
+pub fn remove_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let assert option.Some(ms) = limiter.memory_store
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  memory_store.get_count(ms) |> should.equal(1)
+  let assert Ok(Nil) = memory_store.remove(ms, "glimit:\"a\"")
+  memory_store.get_count(ms) |> should.equal(0)
+}
+
+pub fn remove_nonexistent_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let assert option.Some(ms) = limiter.memory_store
+  memory_store.remove(ms, "glimit:\"nonexistent\"") |> should.equal(Ok(Nil))
+}
+
+pub fn set_now_and_hit_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.burst_limit(3)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let limiter = set_now(limiter, 0)
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.equal(Error(glimit.RateLimited))
+
+  let limiter = set_now(limiter, 1000)
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.equal(Error(glimit.RateLimited))
+}
+
+pub fn sweep_get_count_after_sweep_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let assert option.Some(ms) = limiter.memory_store
+  let limiter = set_now(limiter, 0)
+
+  glimit.hit(limiter, "keep") |> should.be_ok
+  glimit.hit(limiter, "remove") |> should.be_ok
+  glimit.hit(limiter, "remove") |> should.be_ok
+
+  let assert Ok(Nil) = memory_store.sweep(ms, 1_000_000, option.Some(60_000))
+  memory_store.get_count(ms) |> should.equal(0)
+}
+
+pub fn dynamic_config_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second_fn(fn(id) {
+      case id {
+        "fast" -> 10
+        _ -> 1
+      }
+    })
+    |> glimit.burst_limit_fn(fn(id) {
+      case id {
+        "fast" -> 10
+        _ -> 1
+      }
+    })
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(limiter, "fast") |> should.be_ok
+  glimit.hit(limiter, "fast") |> should.be_ok
+  glimit.hit(limiter, "slow") |> should.be_ok
+  glimit.hit(limiter, "slow") |> should.equal(Error(glimit.RateLimited))
+}
+
+pub fn invalid_config_returns_unavailable_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second_fn(fn(id) {
+      case id {
+        "bad" -> 0
+        _ -> 2
+      }
+    })
+    |> glimit.burst_limit_fn(fn(id) {
+      case id {
+        "bad" -> 0
+        _ -> 2
+      }
+    })
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let assert option.Some(ms) = limiter.memory_store
+
+  // Valid identifier works
+  glimit.hit(limiter, "good") |> should.be_ok
+
+  // Invalid config fails open with Unavailable
+  glimit.hit(limiter, "bad") |> should.equal(Error(glimit.Unavailable))
+
+  // Invalid identifier is not stored
+  memory_store.get_count(ms) |> should.equal(1)
+}
+
+pub fn crashing_callback_returns_unavailable_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second_fn(fn(id) {
+      case id {
+        "crash" -> panic as "boom"
+        _ -> 2
+      }
+    })
+    |> glimit.burst_limit_fn(fn(id) {
+      case id {
+        "crash" -> panic as "boom"
+        _ -> 2
+      }
+    })
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  // Crashing callback should return Unavailable
+  glimit.hit(limiter, "crash") |> should.equal(Error(glimit.Unavailable))
+
+  // Still serving other identifiers
+  glimit.hit(limiter, "good") |> should.be_ok
+}
+
+pub fn crashing_single_callback_returns_unavailable_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second_fn(fn(id) {
+      case id {
+        "crash" -> panic as "boom"
+        _ -> 2
+      }
+    })
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(limiter, "crash") |> should.equal(Error(glimit.Unavailable))
+
+  glimit.hit(limiter, "good") |> should.be_ok
+}
+
+pub fn sweep_idle_bucket_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.burst_limit(100)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let assert option.Some(ms) = limiter.memory_store
+  let limiter = set_now(limiter, 0)
+
+  // Exhaust all 100 tokens
+  list.repeat(Nil, 100)
+  |> list.each(fn(_) {
+    let _ = glimit.hit(limiter, "a")
+    Nil
+  })
+
+  memory_store.get_count(ms) |> should.equal(1)
+
+  // At t=61_000: tokens = 0 + 61 = 61 < 100, not full
+  // But idle for 61s > 60s threshold — should be swept
+  let assert Ok(Nil) = memory_store.sweep(ms, 61_000, option.Some(60_000))
+
+  memory_store.get_count(ms) |> should.equal(0)
+}
+
+pub fn sweep_idle_exact_boundary_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.burst_limit(100)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let assert option.Some(ms) = limiter.memory_store
+  let limiter = set_now(limiter, 0)
+
+  list.repeat(Nil, 100)
+  |> list.each(fn(_) {
+    let _ = glimit.hit(limiter, "a")
+    Nil
+  })
+
+  // 60_000 - 0 = 60_000, which is NOT > 60_000 — kept
+  let assert Ok(Nil) = memory_store.sweep(ms, 60_000, option.Some(60_000))
+  memory_store.get_count(ms) |> should.equal(1)
+}
+
+pub fn sweep_idle_preserves_recent_bucket_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.burst_limit(100)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let assert option.Some(ms) = limiter.memory_store
+  let limiter = set_now(limiter, 0)
+
+  list.repeat(Nil, 100)
+  |> list.each(fn(_) {
+    let _ = glimit.hit(limiter, "a")
+    Nil
+  })
+
+  // At t=59_000: tokens = 59 < 100 (not full), idle for 59s < 60s (not idle)
+  let assert Ok(Nil) = memory_store.sweep(ms, 59_000, option.Some(60_000))
+
+  // Should be kept — not full and not idle
+  memory_store.get_count(ms) |> should.equal(1)
+}
+
+pub fn dead_memory_store_returns_unavailable_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.burst_limit(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  // Trap exits so the kill signal doesn't crash the test process
+  let _trapped = process.trap_exits(True)
+
+  // Kill the memory store actor
+  let assert option.Some(ms) = limiter.memory_store
+  let assert Ok(pid) = memory_store.pid(ms)
+  process.kill(pid)
+  process.sleep(10)
+
+  // Hit should return StoreLockFailed (lock_and_get fails on dead actor), not crash
+  glimit.hit(limiter, "a") |> should.equal(Error(glimit.StoreLockFailed))
+}
+
 fn ignore(_value: a) -> Nil {
   Nil
+}
+
+fn set_now(
+  limiter: glimit.RateLimiter(a, b, id),
+  now: Int,
+) -> glimit.RateLimiter(a, b, id) {
+  glimit.RateLimiter(..limiter, now: fn() { now })
 }
 
 // ---------------------------------------------------------------------------
@@ -742,14 +1151,13 @@ fn ignore(_value: a) -> Nil {
 // ---------------------------------------------------------------------------
 
 type StoreMsg {
-  StoreGet(key: String, reply: Subject(Result(bucket.BucketState, Nil)))
-  StoreSet(
+  StoreLockAndGet(key: String, reply: Subject(Result(bucket.BucketState, Nil)))
+  StoreSetAndUnlock(
     key: String,
     state: bucket.BucketState,
     ttl: Int,
     reply: Subject(Nil),
   )
-  StoreLock(key: String, reply: Subject(Bool))
   StoreUnlock(key: String, reply: Subject(Nil))
 }
 
@@ -770,30 +1178,27 @@ fn new_test_store() -> glimit.Store {
     })
     |> actor.on_message(fn(state: StoreState, msg: StoreMsg) {
       case msg {
-        StoreGet(key, reply) -> {
-          case dict.get(state.data, key) {
-            Ok(v) -> actor.send(reply, Ok(v))
-            Error(_) -> actor.send(reply, Error(Nil))
-          }
-          actor.continue(state)
-        }
-        StoreSet(key, bucket_state, _ttl, reply) -> {
-          let data = dict.insert(state.data, key, bucket_state)
-          actor.send(reply, Nil)
-          actor.continue(StoreState(..state, data: data))
-        }
-        StoreLock(key, reply) -> {
+        StoreLockAndGet(key, reply) -> {
           case dict.get(state.locks, key) {
             Ok(True) -> {
-              actor.send(reply, False)
+              actor.send(reply, Error(Nil))
               actor.continue(state)
             }
             _ -> {
               let locks = dict.insert(state.locks, key, True)
-              actor.send(reply, True)
+              case dict.get(state.data, key) {
+                Ok(v) -> actor.send(reply, Ok(v))
+                Error(_) -> actor.send(reply, Error(Nil))
+              }
               actor.continue(StoreState(..state, locks: locks))
             }
           }
+        }
+        StoreSetAndUnlock(key, bucket_state, _ttl, reply) -> {
+          let data = dict.insert(state.data, key, bucket_state)
+          let locks = dict.delete(state.locks, key)
+          actor.send(reply, Nil)
+          actor.continue(StoreState(data: data, locks: locks))
         }
         StoreUnlock(key, reply) -> {
           let locks = dict.delete(state.locks, key)
@@ -807,30 +1212,22 @@ fn new_test_store() -> glimit.Store {
   let store_subject = started.data
 
   bucket.Store(
-    get: fn(key) {
+    lock_and_get: fn(key) {
       let reply: Subject(Result(bucket.BucketState, Nil)) =
         process.new_subject()
-      process.send(store_subject, StoreGet(key, reply))
+      process.send(store_subject, StoreLockAndGet(key, reply))
       case process.receive(reply, 1000) {
         Ok(Ok(v)) -> Ok(option.Some(v))
         Ok(Error(_)) -> Ok(option.None)
         Error(_) -> Error(Nil)
       }
     },
-    set: fn(key, state, ttl) {
+    set_and_unlock: fn(key, state, ttl) {
       let reply = process.new_subject()
-      process.send(store_subject, StoreSet(key, state, ttl, reply))
+      process.send(store_subject, StoreSetAndUnlock(key, state, ttl, reply))
       case process.receive(reply, 1000) {
         Ok(_) -> Ok(Nil)
         Error(_) -> Error(Nil)
-      }
-    },
-    lock: fn(key) {
-      let reply = process.new_subject()
-      process.send(store_subject, StoreLock(key, reply))
-      case process.receive(reply, 1000) {
-        Ok(True) -> Ok(Nil)
-        _ -> Error(Nil)
       }
     },
     unlock: fn(key) {
@@ -902,14 +1299,8 @@ pub fn store_burst_limit_test() {
     fn(_) { "OK" }
     |> glimit.apply_built(limiter)
 
-  rate_limiter.set_now(limiter.rate_limiter_actor, 0)
   func(Nil) |> should.equal("OK")
   func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("OK")
-  func(Nil) |> should.equal("Stop!")
-
-  // After 1 second, 1 token refills
-  rate_limiter.set_now(limiter.rate_limiter_actor, 1000)
   func(Nil) |> should.equal("OK")
   func(Nil) |> should.equal("Stop!")
 }
