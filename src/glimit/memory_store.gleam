@@ -13,7 +13,7 @@ import glimit/utils
 const call_timeout = 1000
 
 /// Opaque handle to the in-memory store actor.
-/// Provides sweep/count/remove operations that only make sense for in-memory storage.
+/// Provides get/set/sweep/count/remove operations for in-memory rate limiting.
 ///
 pub opaque type MemoryStore {
   MemoryStore(subject: Subject(Msg))
@@ -29,15 +29,8 @@ type State {
 }
 
 type Msg {
-  Get(key: String, reply: Subject(Result(Option(BucketState), Nil)))
-  Set(
-    key: String,
-    state: BucketState,
-    ttl: Int,
-    reply: Subject(Result(Nil, Nil)),
-  )
-  Lock(key: String, reply: Subject(Result(Nil, Nil)))
-  Unlock(key: String, reply: Subject(Result(Nil, Nil)))
+  Get(key: String, reply: Subject(Option(BucketState)))
+  Set(key: String, state: BucketState, reply: Subject(Nil))
   Sweep(now: Int, max_idle_ms: Option(Int), reply: Subject(Nil))
   SweepTimer
   GetCount(reply: Subject(Int))
@@ -46,16 +39,13 @@ type Msg {
 
 /// Create a new in-memory store.
 ///
-/// Returns a tuple of the `Store` interface (for the rate limiter) and a
-/// `MemoryStore` handle (for sweep/count/remove operations).
-///
 /// `max_idle_ms` is the idle eviction threshold, or `None` to disable.
 /// `sweep_interval_ms` is the interval between automatic sweeps.
 ///
 pub fn new(
   max_idle_ms: Option(Int),
   sweep_interval_ms: Int,
-) -> Result(#(bucket.Store, MemoryStore), Nil) {
+) -> Result(MemoryStore, Nil) {
   let start_result =
     actor.new_with_initialiser(call_timeout, fn(self_subject) {
       let state =
@@ -77,62 +67,38 @@ pub fn new(
     |> actor.start
 
   case start_result {
-    Ok(started) -> {
-      let subject = started.data
-      let store = make_store(subject)
-      let handle = MemoryStore(subject: subject)
-      Ok(#(store, handle))
-    }
+    Ok(started) -> Ok(MemoryStore(subject: started.data))
     Error(_) -> Error(Nil)
   }
 }
 
-fn make_store(subject: Subject(Msg)) -> bucket.Store {
+/// Create a `bucket.Store` backed by this in-memory actor.
+///
+/// Lock and unlock are no-ops since the OTP actor serializes messages.
+///
+pub fn make_store(store: MemoryStore) -> bucket.Store {
   bucket.Store(
-    get: fn(key) {
-      utils.safe_call(subject, Get(key, _), call_timeout)
-      |> result.flatten
+    lock_and_get: fn(key) {
+      utils.safe_call(store.subject, Get(key, _), call_timeout)
     },
-    set: fn(key, state, ttl) {
-      utils.safe_call(subject, Set(key, state, ttl, _), call_timeout)
-      |> result.flatten
+    set_and_unlock: fn(key, state, _ttl) {
+      utils.safe_call(store.subject, Set(key, state, _), call_timeout)
     },
-    lock: fn(_key) {
-      // No-op: the actor serializes access
-      Ok(Nil)
-    },
-    unlock: fn(_key) {
-      // No-op: the actor serializes access
-      Ok(Nil)
-    },
+    unlock: fn(_key) { Ok(Nil) },
   )
 }
 
 fn handle_message(state: State, msg: Msg) -> actor.Next(State, Msg) {
   case msg {
     Get(key, reply) -> {
-      let result = case dict.get(state.data, key) {
-        Ok(b) -> Ok(Some(b))
-        Error(_) -> Ok(None)
-      }
-      actor.send(reply, result)
+      actor.send(reply, dict.get(state.data, key) |> option.from_result)
       actor.continue(state)
     }
 
-    Set(key, bucket_state, _ttl, reply) -> {
+    Set(key, bucket_state, reply) -> {
       let data = dict.insert(state.data, key, bucket_state)
-      actor.send(reply, Ok(Nil))
+      actor.send(reply, Nil)
       actor.continue(State(..state, data: data))
-    }
-
-    Lock(_key, reply) -> {
-      actor.send(reply, Ok(Nil))
-      actor.continue(state)
-    }
-
-    Unlock(_key, reply) -> {
-      actor.send(reply, Ok(Nil))
-      actor.continue(state)
     }
 
     Sweep(now, max_idle_ms, reply) -> {
@@ -187,6 +153,12 @@ fn schedule_sweep(state: State) -> Nil {
   let _ =
     process.send_after(state.self_subject, state.sweep_interval_ms, SweepTimer)
   Nil
+}
+
+/// Return the pid of the memory store actor.
+///
+pub fn pid(store: MemoryStore) -> Result(process.Pid, Nil) {
+  process.subject_owner(store.subject)
 }
 
 /// Return the number of tracked identifiers.

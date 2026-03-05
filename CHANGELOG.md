@@ -7,6 +7,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `glimit.hit(limiter, identifier)` for direct rate limit checks without the `apply` wrapper.
+- `glimit.HitError` type with `RateLimited`, `Unavailable`, and `StoreLockFailed` constructors (was a re-export, now standalone with the same variants).
+- `bucket.compute_ttl(bucket_state)` — computes a TTL in seconds for bucket state, useful for external store adapters.
+- `RateLimiter` record has a `now` field (`fn() -> Int`) for test time overrides — construct a new limiter with a different `now` to control time in tests.
+
+### Changed
+
+- Removed the internal `rate_limiter` actor. Both in-memory and external store hits now go through a unified `Store` interface (`lock_and_get` / `set_and_unlock` / `unlock`). The builder API (`glimit.new() |> glimit.per_second(10) |> ...`) is unchanged.
+- `Store` type simplified from 4 operations (`get`, `set`, `lock`, `unlock`) to 3 (`lock_and_get`, `set_and_unlock`, `unlock`). Adapters combine lock+get and set+unlock into single operations.
+- `RateLimiter` record fields changed: `rate_limiter_actor` replaced by `per_second`, `burst_limit`, `store`, `memory_store`, and `now`. The builder API is unchanged.
+
+### Removed
+
+- `glimit.sweep()` (was a no-op).
+- `glimit.set_now()` — time overrides are now done by constructing a new `RateLimiter` with a different `now` field.
+
 
 ## 1.3.1 - 2026-03-05
 

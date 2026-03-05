@@ -1,4 +1,4 @@
-//// This module contains pure token-bucket functions used by the rate limiter actor.
+//// This module contains pure token-bucket functions used by the rate limiter.
 ////
 
 import gleam/float
@@ -18,20 +18,24 @@ const key_token_rate = "tr"
 /// A pluggable storage backend for distributed rate limiting.
 ///
 /// All token bucket logic is handled by glimit — store adapters only need to
-/// implement simple get/set/lock/unlock operations on string-keyed bucket state.
+/// implement simple lock-and-get / set-and-unlock operations on string-keyed
+/// bucket state.
 ///
-/// - `get`: Retrieve bucket state by key. Return `Ok(None)` for a new/missing key.
-/// - `set`: Persist bucket state with a TTL in seconds for automatic expiry.
-/// - `lock`: Acquire an exclusive lock for the key. Return `Error(Nil)` if unavailable.
-/// - `unlock`: Release the lock for the key.
+/// - `lock_and_get`: Acquire an exclusive lock for the key and retrieve its
+///   bucket state. Return `Ok(None)` for a new/missing key. If the lock cannot
+///   be acquired, return `Error(Nil)`.
+/// - `set_and_unlock`: Persist bucket state with a TTL in seconds for automatic
+///   expiry, then release the lock.
+/// - `unlock`: Release the lock without writing. Used on error paths when there
+///   is nothing to persist.
 ///
-/// When a lock or get fails, the rate limiter **fails open** (allows the request).
+/// When `lock_and_get` fails, the rate limiter **fails open** (allows the
+/// request).
 ///
 pub type Store {
   Store(
-    get: fn(String) -> Result(Option(BucketState), Nil),
-    set: fn(String, BucketState, Int) -> Result(Nil, Nil),
-    lock: fn(String) -> Result(Nil, Nil),
+    lock_and_get: fn(String) -> Result(Option(BucketState), Nil),
+    set_and_unlock: fn(String, BucketState, Int) -> Result(Nil, Nil),
     unlock: fn(String) -> Result(Nil, Nil),
   )
 }
@@ -157,6 +161,22 @@ pub fn from_pairs(pairs: List(#(String, String))) -> Result(BucketState, Nil) {
     max_token_count: mt,
     token_rate: tr,
   ))
+}
+
+/// Compute a TTL in seconds for the bucket state.
+///
+/// The TTL is based on the time it takes to fully refill from empty, with a
+/// minimum of 60 seconds.
+///
+pub fn compute_ttl(b: BucketState) -> Int {
+  case b.token_rate > 0 {
+    True -> {
+      let refill_seconds =
+        { b.max_token_count + b.token_rate - 1 } / b.token_rate
+      int.max(refill_seconds * 2, 60)
+    }
+    False -> 60
+  }
 }
 
 /// Returns True if the bucket is full after refilling.
