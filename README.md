@@ -11,7 +11,8 @@ A simple, framework-agnostic rate limiter for Gleam with pluggable storage. 💫
 
 * ✨ Simple and easy to use.
 * 📏 Rate limits based on any key (e.g. IP address, or user ID).
-* 🪣 Uses a Token Bucket algorithm to rate limit requests.
+* 🪣 Token Bucket algorithm for smooth rate limiting.
+* 🪟 Fixed-window counters with layered windows for attempt-based limiting.
 * ⚡ ETS-backed by default for low-latency, lock-free rate limiting.
 * 🔌 Pluggable store backend for distributed rate limiting (e.g. Redis, Postgres).
 
@@ -71,6 +72,38 @@ By default, rate limit state is stored in ETS (Erlang Term Storage) using lock-f
 All token bucket logic stays in glimit — adapters only implement `lock_and_get` / `set_and_unlock` / `unlock` operations. The `glimit/bucket` module provides `to_pairs`/`from_pairs` helpers for serialization.
 
 See [`examples/redis/`](https://github.com/nootr/glimit/tree/main/examples/redis) for a complete Redis adapter using [valkyrie](https://hexdocs.pm/valkyrie/).
+
+
+## Fixed-Window Counters
+
+For scenarios where you need discrete attempt counting with clear reset boundaries (e.g. login attempts, verification codes), use the `glimit/window` module:
+
+```gleam
+import glimit/window
+
+let limiter = window.new()
+
+// Define layered windows — all must pass for a request to be allowed
+let windows = [
+  window.Window(window_seconds: 60, max_count: 1),     // 1 per minute
+  window.Window(window_seconds: 900, max_count: 3),    // 3 per 15 minutes
+  window.Window(window_seconds: 3600, max_count: 10),  // 10 per hour
+  window.Window(window_seconds: 86_400, max_count: 20), // 20 per day
+]
+
+case window.check(limiter, email, windows, now_seconds) {
+  Ok(Nil) -> // allowed
+  Error(window.Denied(retry_after)) -> // denied, retry after N seconds
+}
+```
+
+Unlike the token bucket algorithm (which smoothly refills tokens), fixed-window counters divide time into discrete windows and count requests within each. This is useful for:
+
+- Login/verification attempt limiting
+- API rate limiting with clear reset boundaries
+- Layered limits (e.g. per-minute + per-hour + per-day)
+
+Uses ETS with atomic `update_counter` for lock-free, concurrent operation. Call `window.cleanup(limiter, now)` periodically to remove expired entries.
 
 
 ## Performance
