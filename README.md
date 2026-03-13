@@ -13,6 +13,7 @@ A simple, framework-agnostic rate limiter for Gleam with pluggable storage. 💫
 * 📏 Rate limits based on any key (e.g. IP address, or user ID).
 * 🪣 Uses a Token Bucket algorithm to rate limit requests.
 * 🗄️ Works out of the box with in-memory storage; no back-end service needed.
+* ⚡ Optional ETS backend for lower-latency, lock-free rate limiting.
 * 🔌 Pluggable store backend for distributed rate limiting (e.g. Redis, Postgres).
 
 
@@ -75,15 +76,37 @@ See [`examples/redis/`](https://github.com/nootr/glimit/tree/main/examples/redis
 
 ## In-memory Mode
 
-When no store is configured, the rate limiter uses the default in-memory backend. This is simple and fast, but scoped to the BEAM VM cluster it runs in. If your application runs across multiple BEAM VM clusters, rate limits will not be shared between them.
+When no store is configured, the rate limiter uses the default in-memory backend backed by an OTP actor. This is simple and fast, but each hit serializes through two actor messages (`lock_and_get` + `set_and_unlock`).
+
+
+## ETS Mode
+
+For lower-latency rate limiting on a single node, use the built-in ETS backend:
+
+```gleam
+import glimit
+
+let limiter =
+  glimit.new()
+  |> glimit.per_second(10)
+  |> glimit.ets_store()
+  |> glimit.identifier(fn(request) { request.ip })
+  |> glimit.on_limit_exceeded(fn(_request) { "Rate limit reached" })
+```
+
+ETS operations are lock-free and concurrent — no actor messages are needed. Full and idle buckets are automatically swept every 10 seconds. This is the recommended backend for single-node deployments where low latency matters.
+
+Both in-memory and ETS modes are scoped to the BEAM VM they run in. For distributed rate limiting across multiple nodes, use a custom `Store` (e.g. Redis).
 
 
 ## Performance
 
-Every hit goes through the pluggable `Store` interface (`lock_and_get` / `set_and_unlock`). In-memory mode backs this with an OTP actor (two messages per hit); external store mode calls the adapter directly.
+Every hit goes through the pluggable `Store` interface (`lock_and_get` / `set_and_unlock`).
 
-* **Memory** (in-memory mode): One dict entry per unique identifier. Full and idle buckets are automatically swept every 10 seconds.
+* **In-memory mode**: Two OTP actor messages per hit. One dict entry per unique identifier.
+* **ETS mode**: Direct atomic table operations per hit. No actor overhead.
 * **Fail-open**: If the store is unavailable or a lock cannot be acquired, the request is allowed through rather than rejected.
+* **Sweep**: Full and idle buckets are automatically swept every 10 seconds in both in-memory and ETS modes.
 
 
 ## Documentation
