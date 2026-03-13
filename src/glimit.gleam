@@ -77,6 +77,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import glimit/bucket
+import glimit/ets_store
 import glimit/memory_store.{type MemoryStore}
 import glimit/utils
 
@@ -301,6 +302,38 @@ pub fn store(
   store: Store,
 ) -> RateLimiterBuilder(a, b, id) {
   RateLimiterBuilder(..limiter, store: Some(store))
+}
+
+/// Use an ETS-backed store instead of the default OTP actor.
+///
+/// ETS provides lower-latency rate limiting by using atomic table operations
+/// directly, avoiding the overhead of OTP actor messages. Suitable for
+/// single-node deployments.
+///
+/// Full and idle buckets are swept every 10 seconds. Idle eviction uses
+/// the `max_idle` setting (default 60 seconds).
+///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.per_second(10)
+///   |> glimit.ets_store()
+///   |> glimit.identifier(fn(request) { request.ip })
+///   |> glimit.on_limit_exceeded(fn(_request) { "Rate limit reached" })
+/// ```
+///
+pub fn ets_store(
+  limiter: RateLimiterBuilder(a, b, id),
+) -> RateLimiterBuilder(a, b, id) {
+  let es = ets_store.new_with_sweep(
+    max_idle_ms: limiter.max_idle_ms,
+    sweep_interval_ms: 10_000,
+  )
+  RateLimiterBuilder(..limiter, store: Some(ets_store.make_store(es)))
 }
 
 /// Set the handler to be called when the rate limit is reached.
