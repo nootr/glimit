@@ -1,12 +1,13 @@
 //// This module provides a rate limiter that can be used to limit the number of
 //// requests or function calls per second for a given identifier.
 ////
-//// In-memory mode: each hit sends two messages to an OTP actor (get + set).
-//// A periodic sweep removes full or idle buckets to reduce memory usage. The
-//// idle threshold defaults to 60 seconds and can be configured via `max_idle`.
+//// By default, rate limit state is stored in an ETS table with lock-free
+//// atomic operations. A periodic sweep removes full or idle buckets to
+//// reduce memory usage. The idle threshold defaults to 60 seconds and can
+//// be configured via `max_idle`.
 ////
-//// External store mode: each hit calls the store's lock_and_get/set_and_unlock
-//// interface directly, with no actor overhead.
+//// For distributed rate limiting, you can provide a custom `Store` that
+//// persists bucket state externally (Redis, Postgres, etc.).
 ////
 //// The rate limiter fails open — if the store is unavailable, requests are
 //// allowed through.
@@ -60,7 +61,7 @@
 ////
 //// # Pluggable store backend
 ////
-//// By default, rate limit state is stored in-memory using an OTP actor. For
+//// By default, rate limit state is stored in-memory using ETS. For
 //// distributed rate limiting (e.g. across multiple nodes), you can provide a
 //// custom `Store` that persists bucket state externally (Redis, Postgres, etc.).
 ////
@@ -77,8 +78,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import glimit/bucket
-import glimit/ets_store
-import glimit/memory_store.{type MemoryStore}
+import glimit/ets_store.{type EtsStore}
 import glimit/utils
 
 const store_key_prefix = "glimit:"
@@ -109,7 +109,7 @@ pub type RateLimiter(a, b, id) {
     per_second: fn(id) -> Int,
     burst_limit: fn(id) -> Int,
     store: Store,
-    memory_store: Option(MemoryStore),
+    ets_store: Option(EtsStore),
     now: fn() -> Int,
   )
 }
@@ -281,7 +281,7 @@ pub fn max_idle(
 /// Set a pluggable store backend for distributed rate limiting.
 ///
 /// When a store is configured, bucket state is read from and written to the
-/// store on each hit instead of being kept in memory.
+/// store on each hit instead of using the default ETS backend.
 /// External stores handle expiry via TTL.
 ///
 /// # Example
@@ -302,38 +302,6 @@ pub fn store(
   store: Store,
 ) -> RateLimiterBuilder(a, b, id) {
   RateLimiterBuilder(..limiter, store: Some(store))
-}
-
-/// Use an ETS-backed store instead of the default OTP actor.
-///
-/// ETS provides lower-latency rate limiting by using atomic table operations
-/// directly, avoiding the overhead of OTP actor messages. Suitable for
-/// single-node deployments.
-///
-/// Full and idle buckets are swept every 10 seconds. Idle eviction uses
-/// the `max_idle` setting (default 60 seconds).
-///
-/// # Example
-///
-/// ```gleam
-/// import glimit
-///
-/// let limiter =
-///   glimit.new()
-///   |> glimit.per_second(10)
-///   |> glimit.ets_store()
-///   |> glimit.identifier(fn(request) { request.ip })
-///   |> glimit.on_limit_exceeded(fn(_request) { "Rate limit reached" })
-/// ```
-///
-pub fn ets_store(
-  limiter: RateLimiterBuilder(a, b, id),
-) -> RateLimiterBuilder(a, b, id) {
-  let es = ets_store.new_with_sweep(
-    max_idle_ms: limiter.max_idle_ms,
-    sweep_interval_ms: 10_000,
-  )
-  RateLimiterBuilder(..limiter, store: Some(ets_store.make_store(es)))
 }
 
 /// Set the handler to be called when the rate limit is reached.
@@ -439,14 +407,17 @@ pub fn build(
     None -> Error("`on_limit_exceeded` function is required")
   })
 
-  use #(store, ms) <- result.try(case config.store {
-    Some(ext_store) -> Ok(#(ext_store, None))
-    None ->
-      case memory_store.new(config.max_idle_ms, 10_000) {
-        Ok(handle) -> Ok(#(memory_store.make_store(handle), Some(handle)))
-        Error(_) -> Error("Failed to start memory store")
-      }
-  })
+  let #(store, es) = case config.store {
+    Some(ext_store) -> #(ext_store, None)
+    None -> {
+      let es =
+        ets_store.new_with_sweep(
+          max_idle_ms: config.max_idle_ms,
+          sweep_interval_ms: 10_000,
+        )
+      #(ets_store.make_store(es), Some(es))
+    }
+  }
 
   Ok(RateLimiter(
     on_limit_exceeded: on_limit_exceeded,
@@ -454,7 +425,7 @@ pub fn build(
     per_second: per_second,
     burst_limit: burst_limit,
     store: store,
-    memory_store: ms,
+    ets_store: es,
     now: utils.now,
   ))
 }
@@ -511,26 +482,26 @@ pub fn apply_built(
   }
 }
 
-/// Return the number of tracked identifiers in the in-memory store.
+/// Return the number of tracked identifiers in the ETS store.
 ///
 /// Returns 0 if the rate limiter uses an external store.
 ///
 pub fn get_count(limiter: RateLimiter(a, b, id)) -> Int {
-  case limiter.memory_store {
-    Some(ms) -> memory_store.get_count(ms)
+  case limiter.ets_store {
+    Some(es) -> ets_store.get_count(es)
     None -> 0
   }
 }
 
-/// Remove an identifier from the in-memory store.
+/// Remove an identifier from the ETS store.
 ///
 /// No-op if the rate limiter uses an external store.
 ///
 pub fn remove(limiter: RateLimiter(a, b, id), identifier: id) -> Nil {
-  case limiter.memory_store {
-    Some(ms) -> {
+  case limiter.ets_store {
+    Some(es) -> {
       let key = string_key(identifier)
-      let _ = memory_store.remove(ms, key)
+      let _ = ets_store.remove(es, key)
       Nil
     }
     None -> Nil

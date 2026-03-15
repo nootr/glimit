@@ -212,12 +212,11 @@ pub fn ets_store_sweep_mixed_buckets_test() {
   ets_store.get_count(es) |> should.equal(0)
 }
 
-pub fn ets_store_builder_test() {
-  // Test using the glimit.ets_store() builder convenience function
+pub fn ets_store_default_test() {
+  // ETS is the default — no explicit store configuration needed
   let limiter =
     glimit.new()
     |> glimit.per_second(2)
-    |> glimit.ets_store()
     |> glimit.identifier(fn(_) { "id" })
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
 
