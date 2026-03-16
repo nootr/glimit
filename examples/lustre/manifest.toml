@@ -19,7 +19,7 @@ packages = [
   { name = "logging", version = "1.3.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "logging", source = "hex", outer_checksum = "1098FBF10B54B44C2C7FDF0B01C1253CAFACDACABEFB4B0D027803246753E06D" },
   { name = "lustre", version = "5.6.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "houdini"], otp_app = "lustre", source = "hex", outer_checksum = "EE558CD4DB9F09FCC16417ADF0183A3C2DAC3E4B21ED3AC0CAE859792AB810CA" },
   { name = "mist", version = "5.0.4", build_tools = ["gleam"], requirements = ["exception", "gleam_erlang", "gleam_http", "gleam_otp", "gleam_stdlib", "gleam_yielder", "glisten", "gramps", "hpack_erl", "logging"], otp_app = "mist", source = "hex", outer_checksum = "7CED4B2D81FD547ADB093D97B9928B9419A7F58B8562A30A6CC17A252B31AD05" },
-  { name = "telemetry", version = "1.4.0", build_tools = ["rebar3"], requirements = [], otp_app = "telemetry", source = "hex", outer_checksum = "D1FF426F988AC1092F9D684D34D08E51042A70567C16BE793FBC8F399FD2E77D" },
+  { name = "telemetry", version = "1.4.1", build_tools = ["rebar3"], requirements = [], otp_app = "telemetry", source = "hex", outer_checksum = "2172E05A27531D3D31DD9782841065C50DD5C3C7699D95266B2EDD54C2DAFA1C" },
 ]
 
 [requirements]
