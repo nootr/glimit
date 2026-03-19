@@ -13,7 +13,7 @@ A simple, framework-agnostic rate limiter for Gleam with pluggable storage. 💫
 * 📏 Rate limits based on any key (e.g. IP address, or user ID).
 * 🪣 Token Bucket algorithm for smooth rate limiting.
 * 🪟 Fixed-window counters with layered windows for attempt-based limiting.
-* ⚡ ETS-backed by default for low-latency, lock-free rate limiting.
+* ⚡ ETS-backed by default for low-latency rate limiting; no separate back-end service needed.
 * 🔌 Pluggable store backend for distributed rate limiting (e.g. Redis, Postgres).
 
 
@@ -67,7 +67,7 @@ More practical examples can be found in the `examples/` directory, such as Wisp 
 
 ## Pluggable Store Backend
 
-By default, rate limit state is stored in ETS (Erlang Term Storage) using lock-free atomic operations. For distributed rate limiting across multiple nodes, you can provide a custom `Store` that persists bucket state in an external service like Redis or Postgres.
+By default, rate limit state is stored in ETS (Erlang Term Storage). For distributed rate limiting across multiple nodes, you can provide a custom `Store` that persists bucket state in an external service like Redis or Postgres.
 
 All token bucket logic stays in glimit — adapters only implement `lock_and_get` / `set_and_unlock` / `unlock` operations. The `glimit/bucket` module provides `to_pairs`/`from_pairs` helpers for serialization.
 
@@ -110,7 +110,7 @@ Uses ETS with atomic `update_counter` for lock-free, concurrent operation. Call 
 
 Every hit goes through the pluggable `Store` interface (`lock_and_get` / `set_and_unlock`).
 
-* **Default (ETS)**: Direct atomic table operations per hit. No actor overhead. Lock-free and concurrent.
+* **Default (ETS)**: Direct table operations per hit. No actor overhead.
 * **Fail-open**: If the store is unavailable or a lock cannot be acquired, the request is allowed through rather than rejected.
 * **Sweep**: Full and idle buckets are automatically swept every 10 seconds.
 

@@ -1,13 +1,12 @@
 //// ETS-backed storage backend for rate limiting.
 ////
-//// Uses a public ETS table with atomic operations, avoiding the overhead
-//// of OTP actor messages. Suitable for single-node deployments where
-//// low latency is important.
+//// Uses a public ETS table for low-latency, concurrent access without
+//// the overhead of OTP actor messages.
 ////
-//// Unlike the default in-memory store (which serializes through an actor),
-//// ETS operations are lock-free and concurrent. The trade-off is that
-//// lock/unlock semantics are no-ops — ETS provides atomicity at the
-//// single-operation level, which is sufficient for token bucket updates.
+//// Note: individual ETS operations are atomic, but the get-then-set
+//// sequence is not — under very high concurrency a small number of
+//// extra requests may slip through. This is an acceptable trade-off
+//// for simplicity and performance in typical workloads.
 ////
 
 import gleam/option.{type Option, None, Some}
@@ -54,9 +53,7 @@ pub fn make_store(store: EtsStore) -> bucket.Store {
         Error(_) -> Ok(None)
       }
     },
-    set_and_unlock: fn(key, state, _ttl) {
-      ets_set(store.table, key, state)
-    },
+    set_and_unlock: fn(key, state, _ttl) { ets_set(store.table, key, state) },
     unlock: fn(_key) { Ok(Nil) },
   )
 }
@@ -85,11 +82,7 @@ pub fn remove(store: EtsStore, key: String) -> Result(Nil, Nil) {
   ets_delete(store.table, key)
 }
 
-fn is_idle(
-  state: BucketState,
-  now: Int,
-  max_idle_ms: Option(Int),
-) -> Bool {
+fn is_idle(state: BucketState, now: Int, max_idle_ms: Option(Int)) -> Bool {
   case max_idle_ms {
     None -> False
     Some(threshold) ->
@@ -122,20 +115,13 @@ fn ets_new() -> EtsTable
 fn ets_get(table: EtsTable, key: String) -> Result(BucketState, Nil)
 
 @external(erlang, "ets_store_ffi", "set")
-fn ets_set(
-  table: EtsTable,
-  key: String,
-  state: BucketState,
-) -> Result(Nil, Nil)
+fn ets_set(table: EtsTable, key: String, state: BucketState) -> Result(Nil, Nil)
 
 @external(erlang, "ets_store_ffi", "delete")
 fn ets_delete(table: EtsTable, key: String) -> Result(Nil, Nil)
 
 @external(erlang, "ets_store_ffi", "sweep")
-fn ets_sweep(
-  table: EtsTable,
-  predicate: fn(String, BucketState) -> Bool,
-) -> Int
+fn ets_sweep(table: EtsTable, predicate: fn(String, BucketState) -> Bool) -> Int
 
 @external(erlang, "ets_store_ffi", "size")
 fn ets_size(table: EtsTable) -> Int
