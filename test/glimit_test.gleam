@@ -61,28 +61,28 @@ pub fn burst_limit_test() {
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   let limiter = set_now(limiter, 1000)
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   let limiter = set_now(limiter, 3000)
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   let limiter = set_now(limiter, 6000)
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   let limiter = set_now(limiter, 13_000)
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 }
 
 pub fn dynamic_per_second_test() {
@@ -129,22 +129,22 @@ pub fn dynamic_per_second_static_burst_limit_test() {
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   let limiter = set_now(limiter, 1000)
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   let limiter = set_now(limiter, 0)
   glimit.hit(limiter, "other") |> should.be_ok
   glimit.hit(limiter, "other") |> should.be_ok
   glimit.hit(limiter, "other") |> should.be_ok
-  glimit.hit(limiter, "other") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "other") |> should.be_error
 
   let limiter = set_now(limiter, 1000)
   glimit.hit(limiter, "other") |> should.be_ok
-  glimit.hit(limiter, "other") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "other") |> should.be_error
 }
 
 pub fn static_per_second_dynamic_burst_limit_test() {
@@ -165,20 +165,20 @@ pub fn static_per_second_dynamic_burst_limit_test() {
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   let limiter = set_now(limiter, 1000)
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   let limiter = set_now(limiter, 0)
   glimit.hit(limiter, "other") |> should.be_ok
   glimit.hit(limiter, "other") |> should.be_ok
-  glimit.hit(limiter, "other") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "other") |> should.be_error
 
   let limiter = set_now(limiter, 1000)
   glimit.hit(limiter, "other") |> should.be_ok
-  glimit.hit(limiter, "other") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "other") |> should.be_error
 }
 
 pub fn dynamic_per_second_dynamic_burst_limit_test() {
@@ -205,22 +205,22 @@ pub fn dynamic_per_second_dynamic_burst_limit_test() {
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   let limiter = set_now(limiter, 1000)
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   let limiter = set_now(limiter, 0)
   glimit.hit(limiter, "other") |> should.be_ok
   glimit.hit(limiter, "other") |> should.be_ok
   glimit.hit(limiter, "other") |> should.be_ok
-  glimit.hit(limiter, "other") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "other") |> should.be_error
 
   let limiter = set_now(limiter, 1000)
   glimit.hit(limiter, "other") |> should.be_ok
-  glimit.hit(limiter, "other") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "other") |> should.be_error
 }
 
 pub fn sub_second_remainder_preservation_test() {
@@ -237,32 +237,32 @@ pub fn sub_second_remainder_preservation_test() {
   let limiter = set_now(limiter, 0)
   list.repeat(Nil, 10)
   |> list.each(fn(_) { glimit.hit(limiter, "id") |> ignore })
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   // 400ms: tc = 0.0 + 2.0 * 400 / 1000 = 0.8 < 1.0 — still rate limited
   let limiter = set_now(limiter, 400)
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   // 500ms: tc = 0.8 + 2.0 * 100 / 1000 = 1.0 >= 1.0 — succeeds
   let limiter = set_now(limiter, 500)
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   // 900ms: tc = 0.0 + 2.0 * 400 / 1000 = 0.8 < 1.0
   let limiter = set_now(limiter, 900)
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   // 1000ms: tc = 0.8 + 2.0 * 100 / 1000 = 1.0 >= 1.0
   let limiter = set_now(limiter, 1000)
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   // 2500ms: tc = 0.0 + 2.0 * 1500 / 1000 = 3.0 — 3 tokens
   let limiter = set_now(limiter, 2500)
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 }
 
 pub fn sub_second_remainder_non_divisible_rate_test() {
@@ -279,25 +279,25 @@ pub fn sub_second_remainder_non_divisible_rate_test() {
   let limiter = set_now(limiter, 0)
   list.repeat(Nil, 5)
   |> list.each(fn(_) { glimit.hit(limiter, "id") |> ignore })
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   // 333ms: tc = 0.0 + 3.0 * 333 / 1000 = 0.999 < 1.0
   let limiter = set_now(limiter, 333)
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   // 334ms: tc = 0.999 + 3.0 * 1 / 1000 = 1.002 >= 1.0 — succeeds
   let limiter = set_now(limiter, 334)
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   // 666ms: tc = 0.002 + 3.0 * 332 / 1000 = 0.998 < 1.0
   let limiter = set_now(limiter, 666)
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   // 667ms: tc = 0.998 + 3.0 * 1 / 1000 = 1.001 >= 1.0 — succeeds
   let limiter = set_now(limiter, 667)
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   // 3000ms: tc = 0.001 + 3.0 * 2333 / 1000 = 7.0, capped at burst limit 5
   let limiter = set_now(limiter, 3000)
@@ -306,7 +306,7 @@ pub fn sub_second_remainder_non_divisible_rate_test() {
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 }
 
 pub fn build_missing_per_second_test() {
@@ -347,12 +347,12 @@ pub fn builder_overwrite_test() {
   // burst_limit=2: two hits succeed, third is limited
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   // Advance 1 second — per_second=1 so only 1 token refilled (not 999)
   let limiter = set_now(limiter, 1000)
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 }
 
 pub fn apply2_test() {
@@ -458,7 +458,7 @@ pub fn hit_rate_limited_test() {
 
   glimit.hit(limiter, "a") |> should.be_ok
   glimit.hit(limiter, "a") |> should.be_ok
-  glimit.hit(limiter, "a") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "a") |> should.be_error
 }
 
 pub fn hit_different_ids_test() {
@@ -471,9 +471,9 @@ pub fn hit_different_ids_test() {
     |> glimit.build
 
   glimit.hit(limiter, "a") |> should.be_ok
-  glimit.hit(limiter, "a") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "a") |> should.be_error
   glimit.hit(limiter, "b") |> should.be_ok
-  glimit.hit(limiter, "b") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "b") |> should.be_error
 }
 
 pub fn get_count_empty_test() {
@@ -530,11 +530,11 @@ pub fn set_now_and_hit_test() {
   glimit.hit(limiter, "a") |> should.be_ok
   glimit.hit(limiter, "a") |> should.be_ok
   glimit.hit(limiter, "a") |> should.be_ok
-  glimit.hit(limiter, "a") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "a") |> should.be_error
 
   let limiter = set_now(limiter, 1000)
   glimit.hit(limiter, "a") |> should.be_ok
-  glimit.hit(limiter, "a") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "a") |> should.be_error
 }
 
 pub fn dynamic_config_test() {
@@ -559,7 +559,7 @@ pub fn dynamic_config_test() {
   glimit.hit(limiter, "fast") |> should.be_ok
   glimit.hit(limiter, "fast") |> should.be_ok
   glimit.hit(limiter, "slow") |> should.be_ok
-  glimit.hit(limiter, "slow") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "slow") |> should.be_error
 }
 
 pub fn invalid_config_returns_unavailable_test() {

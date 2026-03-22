@@ -185,3 +185,18 @@ pub fn is_full(state: BucketState, now: Int) -> Bool {
   let state = refill(state, now)
   state.token_count >=. int.to_float(state.max_token_count)
 }
+
+/// Compute the number of seconds until the next token is available.
+///
+/// Returns at least 1 second.
+///
+pub fn retry_after(state: BucketState) -> Int {
+  case state.token_rate > 0 {
+    True -> {
+      let seconds_until_token =
+        float.ceiling({ 1.0 -. state.token_count } /. int.to_float(state.token_rate))
+      int.max(1, float.round(seconds_until_token))
+    }
+    False -> 1
+  }
+}

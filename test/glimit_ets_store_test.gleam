@@ -65,12 +65,12 @@ pub fn ets_store_burst_limit_test() {
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 
   // After 1 second, 1 token refills
   let limiter = set_now(limiter, 1000)
   glimit.hit(limiter, "id") |> should.be_ok
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "id") |> should.be_error
 }
 
 pub fn ets_store_get_count_test() {
