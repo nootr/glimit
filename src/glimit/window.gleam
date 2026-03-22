@@ -9,6 +9,10 @@
 //// - Layered limits (e.g. 1/min + 3/15min + 10/hour + 20/day)
 ////
 //// Uses ETS with atomic `update_counter` for lock-free, concurrent operation.
+//// Individual window checks are atomic, but layered window checks (multiple
+//// windows) are not fully atomic across windows. Under very high concurrency
+//// on the same key, a request may occasionally be over- or under-counted by
+//// one. For login/verification limiting this is negligible.
 ////
 
 /// Opaque handle to a window-based rate limiter backed by ETS.

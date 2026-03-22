@@ -208,12 +208,17 @@ pub fn window(
   seconds seconds: Int,
   max max: Int,
 ) -> RateLimiterBuilder(a, b, id, FixedWindow) {
-  RateLimiterBuilder(
-    ..limiter,
-    windows: list.append(limiter.windows, [
-      window.Window(window_seconds: seconds, max_count: max),
-    ]),
-  )
+  case seconds > 0 && max > 0 {
+    True ->
+      RateLimiterBuilder(
+        ..limiter,
+        windows: list.append(limiter.windows, [
+          window.Window(window_seconds: seconds, max_count: max),
+        ]),
+      )
+    False ->
+      panic as "glimit.window() requires seconds > 0 and max > 0"
+  }
 }
 
 /// Set the rate of new available tokens per second.

@@ -7,6 +7,7 @@ import gleeunit
 import gleeunit/should
 import glimit
 import glimit/bucket
+import glimit/utils
 
 pub fn main() {
   gleeunit.main()
@@ -741,6 +742,30 @@ pub fn window_remove_test() {
   glimit.hit(limiter, "a") |> should.be_error
   glimit.remove(limiter, "a")
   glimit.hit(limiter, "a") |> should.be_ok
+}
+
+pub fn window_zero_seconds_panics_test() {
+  utils.rescue(fn() {
+    glimit.new_window()
+    |> glimit.window(seconds: 0, max: 5)
+  })
+  |> should.be_error
+}
+
+pub fn window_zero_max_panics_test() {
+  utils.rescue(fn() {
+    glimit.new_window()
+    |> glimit.window(seconds: 60, max: 0)
+  })
+  |> should.be_error
+}
+
+pub fn window_negative_seconds_panics_test() {
+  utils.rescue(fn() {
+    glimit.new_window()
+    |> glimit.window(seconds: -1, max: 5)
+  })
+  |> should.be_error
 }
 
 pub fn token_bucket_hit_returns_retry_after_test() {

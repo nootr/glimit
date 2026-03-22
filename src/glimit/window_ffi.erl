@@ -11,7 +11,11 @@ check(Table, Key, MaxCount, WindowSecs, Now) ->
     Count = try ets:update_counter(Table, FullKey, {2, 1})
             catch error:badarg ->
                 ets:insert_new(Table, {FullKey, 0}),
-                ets:update_counter(Table, FullKey, {2, 1})
+                %% Key could be deleted between insert and update (by reset
+                %% or cleanup). Treat as a fresh entry if that happens.
+                try ets:update_counter(Table, FullKey, {2, 1})
+                catch error:badarg -> 1
+                end
             end,
     case Count =< MaxCount of
         true  -> {ok, Count};
@@ -38,6 +42,9 @@ reset(Table, Key) ->
 
 cleanup(Table, Now) ->
     %% Delete entries whose window has fully elapsed.
+    %% Guard: (WindowId + 1) * WindowSecs < Now
+    %% A window with WindowId=1 and WindowSecs=60 covers seconds 60-119,
+    %% so its end is (1+1)*60 = 120. Expired when Now > 119, i.e. Now >= 120.
     ets:select_delete(Table, [
         {{{window, '_', '$1', '$2'}, '_'},
          [{'<', {'*', {'+', '$2', 1}, '$1'}, Now}],
