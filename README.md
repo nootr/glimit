@@ -112,27 +112,6 @@ All token bucket logic stays in glimit. Adapters only implement `lock_and_get` /
 See [`examples/redis/`](https://github.com/nootr/glimit/tree/main/examples/redis) for a complete Redis adapter using [valkyrie](https://hexdocs.pm/valkyrie/).
 
 
-## Standalone Window API
-
-The `glimit/window` module also provides a standalone API for cases where you need direct control over keys and timestamps:
-
-```gleam
-import glimit/window
-
-let limiter = window.new()
-
-let windows = [
-  window.Window(window_seconds: 60, max_count: 1),
-  window.Window(window_seconds: 900, max_count: 3),
-]
-
-case window.check(limiter, email, windows, now_seconds) {
-  Ok(Nil) -> // allowed
-  Error(window.Denied(retry_after)) -> // denied, retry after N seconds
-}
-```
-
-
 ## Performance
 
 * **Default (ETS)**: Direct table operations per hit. No actor overhead.

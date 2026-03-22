@@ -323,12 +323,25 @@ pub fn build_missing_identifier_test() {
   |> should.equal(Error("`identifier` function is required"))
 }
 
-pub fn build_missing_on_limit_exceeded_test() {
+pub fn build_without_on_limit_exceeded_succeeds_test() {
   glimit.new()
   |> glimit.per_second(1)
   |> glimit.identifier(fn(_) { "id" })
   |> glimit.build
-  |> should.equal(Error("`on_limit_exceeded` function is required"))
+  |> should.be_ok
+}
+
+pub fn apply_without_on_limit_exceeded_panics_test() {
+  let config =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.identifier(fn(_) { "id" })
+
+  utils.rescue(fn() {
+    fn(_) { "OK" }
+    |> glimit.apply(config)
+  })
+  |> should.be_error
 }
 
 pub fn builder_overwrite_test() {
@@ -783,6 +796,80 @@ pub fn token_bucket_hit_returns_retry_after_test() {
     glimit.hit(limiter, "id")
   // With 1 token/sec and 0 tokens, retry_after should be 1 second
   ra |> should.equal(1)
+}
+
+pub fn build_without_on_limit_exceeded_hit_works_test() {
+  let assert Ok(limiter) =
+    glimit.new_window()
+    |> glimit.window(seconds: 60, max: 2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.build
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.be_error
+}
+
+pub fn apply_built_without_on_limit_exceeded_panics_test() {
+  let assert Ok(limiter) =
+    glimit.new_window()
+    |> glimit.window(seconds: 60, max: 2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.build
+
+  utils.rescue(fn() {
+    fn(_) { "OK" }
+    |> glimit.apply_built(limiter)
+  })
+  |> should.be_error
+}
+
+pub fn window_cleanup_removes_expired_entries_test() {
+  let assert Ok(limiter) =
+    glimit.new_window()
+    |> glimit.window(seconds: 60, max: 5)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.build
+
+  // Hit at t=0 to create an entry
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.get_count(limiter) |> should.equal(1)
+
+  // Cleanup at t=120s (120_000ms). Window 0 covers 0-59s, expired at 60s.
+  let limiter = set_now(limiter, 120_000)
+  glimit.cleanup(limiter)
+  glimit.get_count(limiter) |> should.equal(0)
+}
+
+pub fn window_cleanup_keeps_current_entries_test() {
+  let assert Ok(limiter) =
+    glimit.new_window()
+    |> glimit.window(seconds: 60, max: 5)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.build
+
+  // Hit at t=10s (10_000ms)
+  let limiter = set_now(limiter, 10_000)
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.get_count(limiter) |> should.equal(1)
+
+  // Cleanup at same time, entry still active
+  glimit.cleanup(limiter)
+  glimit.get_count(limiter) |> should.equal(1)
+}
+
+pub fn token_bucket_cleanup_is_noop_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.build
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  // Should not panic or error
+  glimit.cleanup(limiter)
+  glimit.get_count(limiter) |> should.equal(1)
 }
 
 fn ignore(_value: a) -> Nil {

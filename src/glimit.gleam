@@ -143,7 +143,7 @@ pub type Strategy(id) {
 ///
 pub type RateLimiter(a, b, id) {
   RateLimiter(
-    on_limit_exceeded: fn(a) -> b,
+    on_limit_exceeded: Option(fn(a) -> b),
     identifier: fn(a) -> id,
     strategy: Strategy(id),
     now: fn() -> Int,
@@ -523,11 +523,12 @@ pub fn build(
     Some(identifier) -> Ok(identifier)
     None -> Error("`identifier` function is required")
   })
-  use on_limit_exceeded <- result.try(case config.on_limit_exceeded {
-    Some(on_limit_exceeded) -> Ok(on_limit_exceeded)
-    None -> Error("`on_limit_exceeded` function is required")
-  })
-  Ok(RateLimiter(on_limit_exceeded:, identifier:, strategy:, now: utils.now))
+  Ok(RateLimiter(
+    on_limit_exceeded: config.on_limit_exceeded,
+    identifier:,
+    strategy:,
+    now: utils.now,
+  ))
 }
 
 /// Hit the rate limiter for the given identifier directly.
@@ -568,6 +569,10 @@ pub fn apply(
   func: fn(a) -> b,
   config: RateLimiterBuilder(a, b, id, strategy),
 ) -> fn(a) -> b {
+  case config.on_limit_exceeded {
+    None -> panic as "`on_limit_exceeded` function is required for apply()"
+    Some(_) -> Nil
+  }
   let limiter = case build(config) {
     Ok(limiter) -> limiter
     Error(message) -> panic as message
@@ -584,11 +589,15 @@ pub fn apply_built(
   func: fn(a) -> b,
   limiter: RateLimiter(a, b, id),
 ) -> fn(a) -> b {
+  let on_limit_exceeded = case limiter.on_limit_exceeded {
+    Some(handler) -> handler
+    None -> panic as "`on_limit_exceeded` function is required for apply_built()"
+  }
   fn(input: a) -> b {
     let identifier = limiter.identifier(input)
     case hit(limiter, identifier) {
       Ok(Nil) -> func(input)
-      Error(RateLimited(_)) -> limiter.on_limit_exceeded(input)
+      Error(RateLimited(_)) -> on_limit_exceeded(input)
       Error(Unavailable) | Error(StoreLockFailed) -> func(input)
     }
   }
@@ -603,6 +612,21 @@ pub fn get_count(limiter: RateLimiter(a, b, id)) -> Int {
     TokenBucketStrategy(ets_store: Some(es), ..) -> ets_store.get_count(es)
     TokenBucketStrategy(ets_store: None, ..) -> 0
     WindowStrategy(window_limiter:, ..) -> window.get_count(window_limiter)
+  }
+}
+
+/// Remove expired entries from the rate limiter.
+///
+/// For window-based limiters, removes entries whose window has fully elapsed.
+/// For token bucket limiters, this is a no-op (sweep runs automatically).
+///
+pub fn cleanup(limiter: RateLimiter(a, b, id)) -> Nil {
+  case limiter.strategy {
+    WindowStrategy(window_limiter:, ..) -> {
+      let now_seconds = limiter.now() / 1000
+      window.cleanup(window_limiter, now_seconds)
+    }
+    TokenBucketStrategy(..) -> Nil
   }
 }
 
