@@ -194,7 +194,9 @@ pub fn retry_after(state: BucketState) -> Int {
   case state.token_rate > 0 {
     True -> {
       let seconds_until_token =
-        float.ceiling({ 1.0 -. state.token_count } /. int.to_float(state.token_rate))
+        float.ceiling(
+          { 1.0 -. state.token_count } /. int.to_float(state.token_rate),
+        )
       int.max(1, float.round(seconds_until_token))
     }
     False -> 1

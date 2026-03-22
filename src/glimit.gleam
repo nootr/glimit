@@ -216,8 +216,7 @@ pub fn window(
           window.Window(window_seconds: seconds, max_count: max),
         ]),
       )
-    False ->
-      panic as "glimit.window() requires seconds > 0 and max > 0"
+    False -> panic as "glimit.window() requires seconds > 0 and max > 0"
   }
 }
 
@@ -467,8 +466,7 @@ fn store_hit(
       let _ = store.set_and_unlock(key, new_b, ttl)
       case hit_result {
         Ok(Nil) -> Ok(Nil)
-        Error(Nil) ->
-          Error(RateLimited(retry_after: bucket.retry_after(new_b)))
+        Error(Nil) -> Error(RateLimited(retry_after: bucket.retry_after(new_b)))
       }
     }
   }
@@ -511,12 +509,7 @@ pub fn build(
           #(ets_store.make_store(es), Some(es))
         }
       }
-      Ok(TokenBucketStrategy(
-        per_second:,
-        burst_limit:,
-        store:,
-        ets_store: es,
-      ))
+      Ok(TokenBucketStrategy(per_second:, burst_limit:, store:, ets_store: es))
     }
   })
   use identifier <- result.try(case config.identifier {
@@ -591,7 +584,8 @@ pub fn apply_built(
 ) -> fn(a) -> b {
   let on_limit_exceeded = case limiter.on_limit_exceeded {
     Some(handler) -> handler
-    None -> panic as "`on_limit_exceeded` function is required for apply_built()"
+    None ->
+      panic as "`on_limit_exceeded` function is required for apply_built()"
   }
   fn(input: a) -> b {
     let identifier = limiter.identifier(input)
