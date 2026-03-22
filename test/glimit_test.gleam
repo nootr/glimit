@@ -636,6 +636,130 @@ pub fn crashing_single_callback_returns_unavailable_test() {
   glimit.hit(limiter, "good") |> should.be_ok
 }
 
+pub fn window_builder_basic_test() {
+  let assert Ok(limiter) =
+    glimit.new_window()
+    |> glimit.window(seconds: 60, max: 3)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_error
+}
+
+pub fn window_builder_layered_test() {
+  let assert Ok(limiter) =
+    glimit.new_window()
+    |> glimit.window(seconds: 60, max: 1)
+    |> glimit.window(seconds: 900, max: 3)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "id") |> should.be_ok
+  // Per-minute limit hit
+  glimit.hit(limiter, "id") |> should.be_error
+
+  // Next minute, per-minute resets
+  let limiter = set_now(limiter, 60_000)
+  glimit.hit(limiter, "id") |> should.be_ok
+
+  // Next minute
+  let limiter = set_now(limiter, 120_000)
+  glimit.hit(limiter, "id") |> should.be_ok
+
+  // 15-min limit (3) now exhausted
+  let limiter = set_now(limiter, 180_000)
+  glimit.hit(limiter, "id") |> should.be_error
+}
+
+pub fn window_apply_test() {
+  let limiter =
+    glimit.new_window()
+    |> glimit.window(seconds: 60, max: 2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+
+  let func =
+    fn(_) { "OK" }
+    |> glimit.apply(limiter)
+
+  func("a") |> should.equal("OK")
+  func("a") |> should.equal("OK")
+  func("a") |> should.equal("Stop!")
+}
+
+pub fn window_hit_returns_retry_after_test() {
+  let assert Ok(limiter) =
+    glimit.new_window()
+    |> glimit.window(seconds: 60, max: 1)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  // now_ms = 10_000 -> now_seconds = 10 -> window_id = 0
+  // retry_after = 60 - (10 % 60) = 50
+  let limiter = set_now(limiter, 10_000)
+  glimit.hit(limiter, "id") |> should.be_ok
+  let assert Error(glimit.RateLimited(retry_after: 50)) =
+    glimit.hit(limiter, "id")
+}
+
+pub fn window_build_missing_identifier_test() {
+  glimit.new_window()
+  |> glimit.window(seconds: 60, max: 3)
+  |> glimit.build
+  |> should.equal(Error("`identifier` function is required"))
+}
+
+pub fn window_get_count_test() {
+  let assert Ok(limiter) =
+    glimit.new_window()
+    |> glimit.window(seconds: 60, max: 5)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.get_count(limiter) |> should.equal(0)
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.get_count(limiter) |> should.equal(1)
+}
+
+pub fn window_remove_test() {
+  let assert Ok(limiter) =
+    glimit.new_window()
+    |> glimit.window(seconds: 60, max: 1)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.be_error
+  glimit.remove(limiter, "a")
+  glimit.hit(limiter, "a") |> should.be_ok
+}
+
+pub fn token_bucket_hit_returns_retry_after_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.burst_limit(1)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "id") |> should.be_ok
+  let assert Error(glimit.RateLimited(retry_after: ra)) =
+    glimit.hit(limiter, "id")
+  // With 1 token/sec and 0 tokens, retry_after should be 1 second
+  ra |> should.equal(1)
+}
+
 fn ignore(_value: a) -> Nil {
   Nil
 }
