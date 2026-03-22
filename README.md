@@ -70,11 +70,6 @@ This is useful for:
 - API rate limiting with clear reset boundaries
 - Layered limits (e.g. per-minute + per-hour + per-day)
 
-### Compile-time Safety
-
-The builder uses phantom types to prevent invalid combinations. Calling `per_second` on a window builder or `window` on a token bucket builder is a compile error.
-
-
 ## Direct Checks
 
 Both strategies support `glimit.build` and `glimit.hit` for direct rate limit checks without wrapping a function:
