@@ -78,7 +78,7 @@ pub fn check(
   windows: List(Window),
   now: Int,
 ) -> Result(Nil, Denied) {
-  check_windows(limiter, key, windows, now)
+  check_windows(limiter, key, windows, now, [])
 }
 
 /// Remove all entries for a given key across all window sizes.
@@ -110,6 +110,7 @@ fn check_windows(
   key: String,
   windows: List(Window),
   now: Int,
+  incremented: List(Window),
 ) -> Result(Nil, Denied) {
   case windows {
     [] -> Ok(Nil)
@@ -123,9 +124,28 @@ fn check_windows(
           now,
         )
       {
-        Ok(_count) -> check_windows(limiter, key, rest, now)
-        Error(retry_after) -> Error(Denied(retry_after: retry_after))
+        Ok(_count) ->
+          check_windows(limiter, key, rest, now, [window, ..incremented])
+        Error(retry_after) -> {
+          rollback(limiter, key, incremented, now)
+          Error(Denied(retry_after: retry_after))
+        }
       }
+    }
+  }
+}
+
+fn rollback(
+  limiter: WindowLimiter,
+  key: String,
+  incremented: List(Window),
+  now: Int,
+) -> Nil {
+  case incremented {
+    [] -> Nil
+    [window, ..rest] -> {
+      window_decrement(limiter.table, key, window.window_seconds, now)
+      rollback(limiter, key, rest, now)
     }
   }
 }
@@ -143,6 +163,14 @@ fn window_check(
   window_seconds: Int,
   now: Int,
 ) -> Result(Int, Int)
+
+@external(erlang, "window_ffi", "decrement")
+fn window_decrement(
+  table: WindowTable,
+  key: String,
+  window_seconds: Int,
+  now: Int,
+) -> Nil
 
 @external(erlang, "window_ffi", "reset")
 fn window_reset(table: WindowTable, key: String) -> Nil

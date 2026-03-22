@@ -140,6 +140,29 @@ pub fn get_count_test() {
   window.get_count(limiter) |> should.equal(2)
 }
 
+pub fn denied_request_does_not_increment_earlier_windows_test() {
+  let limiter = window.new()
+  let windows = [
+    window.Window(window_seconds: 60, max_count: 1),
+    window.Window(window_seconds: 900, max_count: 3),
+  ]
+
+  // Use up all 3 requests in the 15-min window across different minutes
+  window.check(limiter, "user", windows, 0) |> should.be_ok
+  window.check(limiter, "user", windows, 60) |> should.be_ok
+  window.check(limiter, "user", windows, 120) |> should.be_ok
+
+  // This should be denied by the 15-min window.
+  // The per-minute window (at now=180) has not been used yet.
+  window.check(limiter, "user", windows, 180) |> should.be_error
+
+  // After the 15-min window resets (at 900), the per-minute window at
+  // now=180 should still be clean (no phantom count from the denied request).
+  // We verify by checking with only the per-minute window.
+  let minute_only = [window.Window(window_seconds: 60, max_count: 1)]
+  window.check(limiter, "user", minute_only, 180) |> should.be_ok
+}
+
 pub fn empty_windows_always_allows_test() {
   let limiter = window.new()
   window.check(limiter, "user", [], 100) |> should.be_ok
