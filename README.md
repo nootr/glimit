@@ -17,9 +17,13 @@ A simple, framework-agnostic rate limiter for Gleam with pluggable storage. 💫
 * 🔌 Pluggable store backend for distributed rate limiting (e.g. Redis, Postgres).
 
 
-## Usage
+## Rate Limiting Strategies
 
-A very minimalistic example of how to use `glimit` would be the following snippet:
+glimit supports two rate limiting strategies, both using the same builder pattern:
+
+### Token Bucket (smooth rate limiting)
+
+Use `glimit.new()` for smooth, token-based rate limiting. Tokens refill at a steady rate, allowing bursts up to the bucket size.
 
 ```gleam
 import glimit
@@ -27,6 +31,7 @@ import glimit
 let limiter =
   glimit.new()
   |> glimit.per_second(2)
+  |> glimit.burst_limit(10)
   |> glimit.identifier(fn(x) { x })
   |> glimit.on_limit_exceeded(fn(_req) { "Too many requests" })
 
@@ -34,16 +39,45 @@ let handler =
   fn(_req) { "Hello, world!" }
   |> glimit.apply(limiter)
 
-handler("🚀") // "Hello, world!"
-handler("💫") // "Hello, world!"
-handler("💫") // "Hello, world!"
-handler("💫") // "Too many requests"
-handler("🚀") // "Hello, world!"
-handler("🚀") // "Too many requests"
+handler("user_a") // "Hello, world!"
+handler("user_a") // "Hello, world!"
+handler("user_a") // "Too many requests"
 ```
 
-You can also use `glimit.build` and `glimit.hit` for direct rate limit checks
-without wrapping a function:
+### Fixed-Window Counters (attempt-based limiting)
+
+Use `glimit.new_window()` for discrete attempt counting with clear reset boundaries. Multiple windows can be layered so that all must pass for a request to be allowed.
+
+```gleam
+import glimit
+
+let limiter =
+  glimit.new_window()
+  |> glimit.window(seconds: 60, max: 1)
+  |> glimit.window(seconds: 900, max: 3)
+  |> glimit.window(seconds: 3600, max: 10)
+  |> glimit.identifier(fn(req) { req.email })
+  |> glimit.on_limit_exceeded(fn(_) { "Too many attempts" })
+
+let handler =
+  fn(_req) { "Code sent!" }
+  |> glimit.apply(limiter)
+```
+
+This is useful for:
+
+- Login/verification attempt limiting
+- API rate limiting with clear reset boundaries
+- Layered limits (e.g. per-minute + per-hour + per-day)
+
+### Compile-time Safety
+
+The builder uses phantom types to prevent invalid combinations. Calling `per_second` on a window builder or `window` on a token bucket builder is a compile error.
+
+
+## Direct Checks
+
+Both strategies support `glimit.build` and `glimit.hit` for direct rate limit checks without wrapping a function:
 
 ```gleam
 import glimit
@@ -57,10 +91,12 @@ let assert Ok(limiter) =
 
 case glimit.hit(limiter, "user_123") {
   Ok(Nil) -> // allowed
-  Error(glimit.RateLimited) -> // rejected
+  Error(glimit.RateLimited(retry_after)) -> // rejected, retry after N seconds
   Error(_) -> // store unavailable, fails open
 }
 ```
+
+Both strategies return `RateLimited(retry_after: Int)` with the number of seconds until the limit resets.
 
 More practical examples can be found in the `examples/` directory, such as Wisp or Mist servers, or a Redis backend.
 
@@ -69,26 +105,25 @@ More practical examples can be found in the `examples/` directory, such as Wisp 
 
 By default, rate limit state is stored in ETS (Erlang Term Storage). For distributed rate limiting across multiple nodes, you can provide a custom `Store` that persists bucket state in an external service like Redis or Postgres.
 
-All token bucket logic stays in glimit — adapters only implement `lock_and_get` / `set_and_unlock` / `unlock` operations. The `glimit/bucket` module provides `to_pairs`/`from_pairs` helpers for serialization.
+Pluggable stores are only available for token bucket rate limiters. Fixed-window counters use ETS directly for atomic counter operations.
+
+All token bucket logic stays in glimit. Adapters only implement `lock_and_get` / `set_and_unlock` / `unlock` operations. The `glimit/bucket` module provides `to_pairs`/`from_pairs` helpers for serialization.
 
 See [`examples/redis/`](https://github.com/nootr/glimit/tree/main/examples/redis) for a complete Redis adapter using [valkyrie](https://hexdocs.pm/valkyrie/).
 
 
-## Fixed-Window Counters
+## Standalone Window API
 
-For scenarios where you need discrete attempt counting with clear reset boundaries (e.g. login attempts, verification codes), use the `glimit/window` module:
+The `glimit/window` module also provides a standalone API for cases where you need direct control over keys and timestamps:
 
 ```gleam
 import glimit/window
 
 let limiter = window.new()
 
-// Define layered windows — all must pass for a request to be allowed
 let windows = [
-  window.Window(window_seconds: 60, max_count: 1),     // 1 per minute
-  window.Window(window_seconds: 900, max_count: 3),    // 3 per 15 minutes
-  window.Window(window_seconds: 3600, max_count: 10),  // 10 per hour
-  window.Window(window_seconds: 86_400, max_count: 20), // 20 per day
+  window.Window(window_seconds: 60, max_count: 1),
+  window.Window(window_seconds: 900, max_count: 3),
 ]
 
 case window.check(limiter, email, windows, now_seconds) {
@@ -97,22 +132,12 @@ case window.check(limiter, email, windows, now_seconds) {
 }
 ```
 
-Unlike the token bucket algorithm (which smoothly refills tokens), fixed-window counters divide time into discrete windows and count requests within each. This is useful for:
-
-- Login/verification attempt limiting
-- API rate limiting with clear reset boundaries
-- Layered limits (e.g. per-minute + per-hour + per-day)
-
-Uses ETS with atomic `update_counter` for lock-free, concurrent operation. Call `window.cleanup(limiter, now)` periodically to remove expired entries.
-
 
 ## Performance
 
-Every hit goes through the pluggable `Store` interface (`lock_and_get` / `set_and_unlock`).
-
 * **Default (ETS)**: Direct table operations per hit. No actor overhead.
 * **Fail-open**: If the store is unavailable or a lock cannot be acquired, the request is allowed through rather than rejected.
-* **Sweep**: Full and idle buckets are automatically swept every 10 seconds.
+* **Sweep**: Full and idle token buckets are automatically swept every 10 seconds.
 
 
 ## Documentation
