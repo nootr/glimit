@@ -6,12 +6,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   update-deps:
     runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -20,33 +21,177 @@ jobs:
           gleam-version: "1.14.0"
           rebar3-version: "3"
 
-      - name: Check for outdated deps
-        id: check
-        run: |
-          OUTPUT=$(gleam deps outdated 2>&1) || true
-          echo "$OUTPUT"
-          if echo "$OUTPUT" | grep -q "All dependencies are up to date"; then
-            echo "outdated=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "outdated=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Update root deps
-        if: steps.check.outputs.outdated == 'true'
         run: gleam update
 
       - name: Update example deps
-        if: steps.check.outputs.outdated == 'true'
         run: |
-          for dir in examples/lustre examples/mist examples/wisp; do
+          for dir in examples/lustre examples/mist examples/wisp examples/redis; do
             echo "Updating $dir"
             cd "$dir"
             gleam update
             cd "$GITHUB_WORKSPACE"
           done
 
+      - name: Create update patch
+        id: diff
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git diff --binary > "$RUNNER_TEMP/deps-update.patch"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload update patch
+        if: steps.diff.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: deps-update-patch
+          path: ${{ runner.temp }}/deps-update.patch
+          retention-days: 1
+
+  test:
+    needs: update-deps
+    if: needs.update-deps.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download update patch
+        uses: actions/download-artifact@v4
+        with:
+          name: deps-update-patch
+          path: ${{ runner.temp }}/deps-update-patch
+      - name: Apply update patch
+        run: git apply "$RUNNER_TEMP/deps-update-patch/deps-update.patch"
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          gleam-version: "1.14.0"
+          rebar3-version: "3"
+      - run: gleam deps download
+      - run: gleam test
+      - run: gleam format --check src test
+
+  examples:
+    needs: update-deps
+    if: needs.update-deps.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [lustre, mist, wisp]
+        include:
+          - example: lustre
+            expected: "glimit + Lustre"
+          - example: mist
+            expected: "Hello, world!"
+          - example: wisp
+            expected: "Hi!"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download update patch
+        uses: actions/download-artifact@v4
+        with:
+          name: deps-update-patch
+          path: ${{ runner.temp }}/deps-update-patch
+      - name: Apply update patch
+        run: git apply "$RUNNER_TEMP/deps-update-patch/deps-update.patch"
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          gleam-version: "1.14.0"
+          rebar3-version: "3"
+      - run: gleam build
+        working-directory: examples/${{ matrix.example }}
+      - name: Start server
+        run: |
+          gleam run &
+          echo $! > /tmp/server.pid
+        working-directory: examples/${{ matrix.example }}
+      - name: Smoke test
+        run: |
+          curl --retry 5 --retry-connrefused --retry-delay 1 -sf http://localhost:8000/ | grep -q '${{ matrix.expected }}'
+      - name: Rate limit test
+        run: |
+          for i in $(seq 1 10); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/)
+            echo "Request $i: HTTP $CODE"
+          done
+          echo "$CODE" | grep -q "429"
+      - name: Stop server
+        if: always()
+        run: kill "$(cat /tmp/server.pid)" 2>/dev/null || true
+
+  examples-redis:
+    needs: update-deps
+    if: needs.update-deps.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download update patch
+        uses: actions/download-artifact@v4
+        with:
+          name: deps-update-patch
+          path: ${{ runner.temp }}/deps-update-patch
+      - name: Apply update patch
+        run: git apply "$RUNNER_TEMP/deps-update-patch/deps-update.patch"
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          gleam-version: "1.14.0"
+          rebar3-version: "3"
+      - run: gleam build
+        working-directory: examples/redis
+      - name: Start server
+        run: |
+          gleam run &
+          echo $! > /tmp/server.pid
+        working-directory: examples/redis
+      - name: Smoke test
+        run: |
+          curl --retry 5 --retry-connrefused --retry-delay 1 -sf http://localhost:8000/ | grep -q 'Hello, world!'
+      - name: Rate limit test
+        run: |
+          for i in $(seq 1 10); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/)
+            echo "Request $i: HTTP $CODE"
+          done
+          echo "$CODE" | grep -q "429"
+      - name: Verify state in Redis
+        run: |
+          docker exec ${{ job.services.redis.id }} redis-cli KEYS 'glimit:*' | grep -q 'glimit:'
+      - name: Stop server
+        if: always()
+        run: kill "$(cat /tmp/server.pid)" 2>/dev/null || true
+
+  create-pr:
+    needs: [update-deps, test, examples, examples-redis]
+    if: needs.update-deps.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download update patch
+        uses: actions/download-artifact@v4
+        with:
+          name: deps-update-patch
+          path: ${{ runner.temp }}/deps-update-patch
+      - name: Apply update patch
+        run: git apply "$RUNNER_TEMP/deps-update-patch/deps-update.patch"
       - name: Create PR
-        if: steps.check.outputs.outdated == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
           branch: chore/gleam-deps-update
@@ -54,6 +199,6 @@ jobs:
           body: |
             Automated Gleam dependency update.
 
-            Run `gleam deps outdated` locally to review changes.
+            The deps-update workflow ran the root and example test jobs before creating this PR.
           commit-message: "chore: update Gleam dependencies"
           delete-branch: true
