@@ -58,7 +58,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Download update patch
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deps-update-patch
           path: ${{ runner.temp }}/deps-update-patch
@@ -91,7 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Download update patch
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deps-update-patch
           path: ${{ runner.temp }}/deps-update-patch
@@ -140,7 +140,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Download update patch
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deps-update-patch
           path: ${{ runner.temp }}/deps-update-patch
@@ -185,7 +185,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Download update patch
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deps-update-patch
           path: ${{ runner.temp }}/deps-update-patch
