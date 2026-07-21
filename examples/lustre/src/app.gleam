@@ -3,13 +3,13 @@ import gleam/erlang/process
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/result
-import gleam/string
 import glimit
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
 import mist.{
-  type Connection, type ConnectionInfo, type ResponseData, get_client_info,
+  type Connection, type ConnectionInfo, type ResponseData, get_connection_info,
+  ip_address_to_string,
 }
 
 fn layout(
@@ -111,9 +111,9 @@ fn handle_request(req: Request(Connection)) -> Response(ResponseData) {
 
 fn get_ip_address(req: Request(Connection)) -> String {
   req.body
-  |> get_client_info
+  |> get_connection_info
   |> result.map(fn(client_info: ConnectionInfo) {
-    client_info.ip_address |> string.inspect
+    client_info.ip_address |> ip_address_to_string
   })
   |> result.unwrap("unknown IP address")
 }
