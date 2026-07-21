@@ -15,7 +15,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "27"
-          gleam-version: "1.14.0"
+          gleam-version: "1.17.0"
           rebar3-version: "3"
           # elixir-version: "1.15.4"
       - run: gleam deps download
@@ -28,7 +28,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "27"
-          gleam-version: "1.14.0"
+          gleam-version: "1.17.0"
           rebar3-version: "3"
       - run: gleam deps download
       - run: gleam export hex-tarball
@@ -50,7 +50,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "27"
-          gleam-version: "1.14.0"
+          gleam-version: "1.17.0"
           rebar3-version: "3"
       - run: gleam build
         working-directory: examples/${{ matrix.example }}
@@ -89,7 +89,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "27"
-          gleam-version: "1.14.0"
+          gleam-version: "1.17.0"
           rebar3-version: "3"
       - run: gleam build
         working-directory: examples/redis

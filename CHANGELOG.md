@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Replaced the default in-memory OTP actor store with ETS-backed storage and automatic sweeping.
 - Extracted the Redis example storage adapter into its own `redis_store` module.
 - Updated examples to the `mist` 6 / `glisten` 9 dependency line with `gleam_stdlib` 1.0.3.
-- Updated GitHub Actions dependencies.
+- Updated GitHub Actions dependencies and CI to Gleam 1.17.0.
 - Added CI validation for building the Hex publish tarball before release tags.
 
 
