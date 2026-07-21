@@ -3,7 +3,6 @@ import gleam/erlang/process
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/result
-import gleam/string
 import glimit
 import mist.{type Connection, type ResponseData}
 import redis_store
@@ -11,8 +10,8 @@ import valkyrie
 
 fn get_ip(req: Request(Connection)) -> String {
   req.body
-  |> mist.get_client_info
-  |> result.map(fn(ci) { ci.ip_address |> string.inspect })
+  |> mist.get_connection_info
+  |> result.map(fn(ci) { ci.ip_address |> mist.ip_address_to_string })
   |> result.unwrap("unknown")
 }
 
