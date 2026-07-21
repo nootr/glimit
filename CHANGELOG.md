@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## 1.5.0 - 2026-07-21
+
+### Added
+
+- ETS-backed storage is now used by default for low-latency in-memory rate limiting.
+- Added dedicated tests for the ETS-backed store.
+
+### Changed
+
+- Replaced the default in-memory OTP actor store with ETS-backed storage and automatic sweeping.
+- Extracted the Redis example storage adapter into its own `redis_store` module.
+- Updated examples to the `mist` 6 / `glisten` 9 dependency line with `gleam_stdlib` 1.0.3.
+- Updated GitHub Actions dependencies.
+
+
 ## 1.4.0 - 2026-03-05
 
 ### Added
