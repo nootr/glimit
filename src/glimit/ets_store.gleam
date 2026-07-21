@@ -108,23 +108,23 @@ fn start_sweep_timer(
 
 // --- Erlang FFI ---
 
-@external(erlang, "ets_store_ffi", "new")
+@external(erlang, "glimit_ets_store_ffi", "new")
 fn ets_new() -> EtsTable
 
-@external(erlang, "ets_store_ffi", "get")
+@external(erlang, "glimit_ets_store_ffi", "get")
 fn ets_get(table: EtsTable, key: String) -> Result(BucketState, Nil)
 
-@external(erlang, "ets_store_ffi", "set")
+@external(erlang, "glimit_ets_store_ffi", "set")
 fn ets_set(table: EtsTable, key: String, state: BucketState) -> Result(Nil, Nil)
 
-@external(erlang, "ets_store_ffi", "delete")
+@external(erlang, "glimit_ets_store_ffi", "delete")
 fn ets_delete(table: EtsTable, key: String) -> Result(Nil, Nil)
 
-@external(erlang, "ets_store_ffi", "sweep")
+@external(erlang, "glimit_ets_store_ffi", "sweep")
 fn ets_sweep(table: EtsTable, predicate: fn(String, BucketState) -> Bool) -> Int
 
-@external(erlang, "ets_store_ffi", "size")
+@external(erlang, "glimit_ets_store_ffi", "size")
 fn ets_size(table: EtsTable) -> Int
 
-@external(erlang, "ets_store_ffi", "set_interval")
+@external(erlang, "glimit_ets_store_ffi", "set_interval")
 fn ets_set_interval(interval_ms: Int, callback: fn() -> Nil) -> Nil

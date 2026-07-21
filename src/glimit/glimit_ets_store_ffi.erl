@@ -1,4 +1,4 @@
--module(ets_store_ffi).
+-module(glimit_ets_store_ffi).
 -export([new/0, get/2, set/3, delete/2, sweep/2, size/1, set_interval/2]).
 
 new() ->

@@ -6,7 +6,6 @@ licences = ["MIT"]
 repository = { type = "github", user = "nootr", repo = "glimit" }
 target = "erlang"
 internal_modules = [
-  "glimit/memory_store",
   "glimit/utils",
 ]
 

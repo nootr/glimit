@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Extracted the Redis example storage adapter into its own `redis_store` module.
 - Updated examples to the `mist` 6 / `glisten` 9 dependency line with `gleam_stdlib` 1.0.3.
 - Updated GitHub Actions dependencies.
+- Added CI validation for building the Hex publish tarball before release tags.
 
 
 ## 1.4.0 - 2026-03-05
