@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Updated GitHub Actions dependencies and CI to Gleam 1.17.0.
 - Added CI validation for building the Hex publish tarball before release tags.
 
+Thanks to [@rapind](https://github.com/rapind) for the contribution!
+
 
 ## 1.4.0 - 2026-03-05
 
