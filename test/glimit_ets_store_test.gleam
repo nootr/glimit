@@ -178,8 +178,38 @@ pub fn ets_store_sweep_idle_bucket_test() {
     Nil
   })
 
-  // At t=61_000: not full (only ~61 tokens refilled), but idle > 60s — swept
+  // At t=61_000: idle for over 60s but only ~61 tokens refilled — kept, so
+  // the client cannot regain its burst by waiting
   ets_store.sweep(store: es, now: 61_000, max_idle_ms: option.Some(60_000))
+  |> should.equal(0)
+  ets_store.get_count(es) |> should.equal(1)
+
+  // At t=100_000: fully refilled — swept
+  ets_store.sweep(store: es, now: 100_000, max_idle_ms: option.Some(60_000))
+  |> should.equal(1)
+  ets_store.get_count(es) |> should.equal(0)
+}
+
+pub fn ets_store_sweep_per_hour_bucket_test() {
+  let es = ets_store.new()
+
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_hour(20)
+    |> glimit.store(ets_store.make_store(es))
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "a") |> should.be_ok
+
+  // One token takes 180s to refill; the bucket is kept until then
+  ets_store.sweep(store: es, now: 61_000, max_idle_ms: option.Some(60_000))
+  |> should.equal(0)
+  ets_store.sweep(store: es, now: 179_999, max_idle_ms: option.Some(60_000))
+  |> should.equal(0)
+  ets_store.sweep(store: es, now: 180_000, max_idle_ms: option.Some(60_000))
   |> should.equal(1)
   ets_store.get_count(es) |> should.equal(0)
 }

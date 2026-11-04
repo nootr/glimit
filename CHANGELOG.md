@@ -18,6 +18,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `bucket.compute_ttl` accounts for the refill period.
 - `RateLimiter` and `RateLimiterBuilder` replace the `per_second` field with `token_rate` and `refill_period_ms`. The builder functions are unchanged.
 - `glimit.build` reports a missing rate as "a rate limit (`per_second`, `per_minute` or `per_hour`) is required".
+- The ETS sweep removes a bucket only once it has refilled to full. Before, it also removed buckets idle for longer than `max_idle` (60 seconds by default), which gave the client a full burst back early.
+
+### Deprecated
+
+- `glimit.max_idle` has no effect. The `max_idle_ms` arguments of `ets_store.new_with_sweep` and `ets_store.sweep` are ignored.
 
 
 ## 1.5.0 - 2026-07-21

@@ -3,9 +3,8 @@
 //// identifier.
 ////
 //// By default, rate limit state is stored in an ETS table with lock-free
-//// atomic operations. A periodic sweep removes full or idle buckets to
-//// reduce memory usage. The idle threshold defaults to 60 seconds and can
-//// be configured via `max_idle`.
+//// atomic operations. A periodic sweep removes buckets that have refilled to
+//// full to reduce memory usage.
 ////
 //// For distributed rate limiting, you can provide a custom `Store` that
 //// persists bucket state externally (Redis, Postgres, etc.).
@@ -154,6 +153,7 @@ pub fn new() -> RateLimiterBuilder(a, b, id) {
 /// available tokens (or the burst rate limit).
 ///
 /// This value is also used as the default value for the `burst_limit` function.
+/// Setting `per_second` replaces any earlier `per_minute` or `per_hour` rate.
 ///
 /// # Example
 ///
@@ -174,9 +174,11 @@ pub fn per_second(
 
 /// Set the rate limit per second, based on the identifier.
 ///
+/// Setting `per_second_fn` replaces any earlier `per_minute` or `per_hour` rate.
+///
 /// Note: this function is evaluated once when a bucket is first created for an
 /// identifier. If the function returns a different value later, existing buckets
-/// are not affected until they are swept (due to idleness or being full) and
+/// are not affected until they are swept (once they have refilled to full) and
 /// re-created on the next hit.
 ///
 /// # Example
@@ -225,9 +227,11 @@ pub fn per_minute(
 
 /// Set the rate limit per minute, based on the identifier.
 ///
+/// Setting `per_minute_fn` replaces any earlier `per_second` or `per_hour` rate.
+///
 /// Note: this function is evaluated once when a bucket is first created for an
 /// identifier. If the function returns a different value later, existing buckets
-/// are not affected until they are swept (due to idleness or being full) and
+/// are not affected until they are swept (once they have refilled to full) and
 /// re-created on the next hit.
 ///
 /// # Example
@@ -257,11 +261,6 @@ pub fn per_minute_fn(
 /// `burst_limit` function. Setting `per_hour` replaces any earlier
 /// `per_second` or `per_minute` rate.
 ///
-/// The default ETS store evicts buckets that have been idle for 60 seconds,
-/// which resets them to full. Set `max_idle` to at least the time a bucket
-/// takes to refill (one hour for a default burst) so that an idle client
-/// cannot regain its budget early.
-///
 /// # Example
 ///
 /// ```gleam
@@ -270,7 +269,6 @@ pub fn per_minute_fn(
 /// let limiter =
 ///   glimit.new()
 ///   |> glimit.per_hour(20)
-///   |> glimit.max_idle(3600)
 /// ```
 ///
 pub fn per_hour(
@@ -282,9 +280,11 @@ pub fn per_hour(
 
 /// Set the rate limit per hour, based on the identifier.
 ///
+/// Setting `per_hour_fn` replaces any earlier `per_second` or `per_minute` rate.
+///
 /// Note: this function is evaluated once when a bucket is first created for an
 /// identifier. If the function returns a different value later, existing buckets
-/// are not affected until they are swept (due to idleness or being full) and
+/// are not affected until they are swept (once they have refilled to full) and
 /// re-created on the next hit.
 ///
 /// # Example
@@ -298,7 +298,6 @@ pub fn per_hour(
 ///   |> glimit.per_hour_fn(fn(user_id) {
 ///     db.get_hourly_rate_limit(user_id)
 ///   })
-///   |> glimit.max_idle(3600)
 /// ```
 ///
 pub fn per_hour_fn(
@@ -348,7 +347,7 @@ pub fn burst_limit(
 ///
 /// Note: this function is evaluated once when a bucket is first created for an
 /// identifier. If the function returns a different value later, existing buckets
-/// are not affected until they are swept (due to idleness or being full) and
+/// are not affected until they are swept (once they have refilled to full) and
 /// re-created on the next hit.
 ///
 /// # Example
@@ -372,30 +371,14 @@ pub fn burst_limit_fn(
   RateLimiterBuilder(..limiter, burst_limit: Some(burst_limit_fn))
 }
 
-/// Set the idle eviction threshold in seconds.
+/// This setting has no effect.
 ///
-/// Buckets that have not been hit for longer than this duration are removed
-/// during periodic sweeps. The default is 60 seconds. Set to `0` to disable
-/// idle eviction entirely.
+/// It used to remove buckets that had not been hit for this many seconds.
+/// Removing a bucket before it has refilled gives the client a full burst
+/// back, so buckets are now kept until they have refilled and are then
+/// removed by the periodic sweep.
 ///
-/// For rate limiters with a high `burst_limit` relative to `per_second`, or
-/// that use `per_minute` or `per_hour`, you may want to increase this value so
-/// that partially-refilled buckets are not evicted prematurely. A good rule of
-/// thumb is the time a bucket takes to refill: `burst_limit / per_second`
-/// seconds, or `3600 * burst_limit / per_hour` seconds.
-///
-/// # Example
-///
-/// ```gleam
-/// import glimit
-///
-/// let limiter =
-///   glimit.new()
-///   |> glimit.per_second(1)
-///   |> glimit.burst_limit(1000)
-///   |> glimit.max_idle(1000)
-/// ```
-///
+@deprecated("Buckets are kept until they have refilled; this setting has no effect")
 pub fn max_idle(
   limiter: RateLimiterBuilder(a, b, id),
   seconds: Int,
