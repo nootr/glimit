@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## Unreleased
+
+### Added
+
+- `glimit.per_minute`, `glimit.per_minute_fn`, `glimit.per_hour` and `glimit.per_hour_fn` set refill rates slower than one token per second, such as 20 requests per hour.
+- `bucket.new_with_period(max_token_count, token_rate, refill_period_ms)` creates a bucket that generates `token_rate` tokens per `refill_period_ms` milliseconds.
+- `BucketState` has a `refill_period_ms` field, serialized by `bucket.to_pairs` under the `"rp"` key. `bucket.from_pairs` treats a missing `"rp"` key as one second, so state written by earlier versions still parses.
+
+### Changed
+
+- `bucket.compute_ttl` accounts for the refill period.
+- `RateLimiter` and `RateLimiterBuilder` replace the `per_second` field with `token_rate` and `refill_period_ms`. The builder functions are unchanged.
+- `glimit.build` reports a missing rate as "a rate limit (`per_second`, `per_minute` or `per_hour`) is required".
+- The ETS sweep removes a bucket only once it has refilled to full. Before, it also removed buckets idle for longer than `max_idle` (60 seconds by default), which gave the client a full burst back early.
+
+### Deprecated
+
+- `glimit.max_idle` has no effect. The `max_idle_ms` arguments of `ets_store.new_with_sweep` and `ets_store.sweep` are ignored.
+
+
 ## 1.5.0 - 2026-07-21
 
 ### Added

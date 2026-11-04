@@ -15,6 +15,10 @@ const key_max_tokens = "mt"
 
 const key_token_rate = "tr"
 
+const key_refill_period = "rp"
+
+const default_refill_period_ms = 1000
+
 /// A pluggable storage backend for distributed rate limiting.
 ///
 /// All token bucket logic is handled by glimit — store adapters only need to
@@ -47,7 +51,7 @@ pub type BucketState {
     /// The maximum number of tokens.
     ///
     max_token_count: Int,
-    /// The rate of token generation per second.
+    /// The number of tokens generated per refill period.
     ///
     token_rate: Int,
     /// The number of tokens available.
@@ -56,15 +60,33 @@ pub type BucketState {
     /// Monotonic timestamp (milliseconds) of the last time the bucket was updated.
     ///
     last_update: Option(Int),
+    /// The length of the refill period in milliseconds. `token_rate` tokens
+    /// are generated, continuously, over each period.
+    ///
+    refill_period_ms: Int,
   )
 }
 
-/// Create a new bucket state.
+/// Create a new bucket state that generates `token_rate` tokens per second.
 ///
 /// Returns Error(Nil) if max_token_count or token_rate are not positive.
 ///
 pub fn new(max_token_count: Int, token_rate: Int) -> Result(BucketState, Nil) {
-  case max_token_count > 0 && token_rate > 0 {
+  new_with_period(max_token_count, token_rate, default_refill_period_ms)
+}
+
+/// Create a new bucket state that generates `token_rate` tokens per
+/// `refill_period_ms` milliseconds.
+///
+/// Returns Error(Nil) if max_token_count, token_rate or refill_period_ms are
+/// not positive.
+///
+pub fn new_with_period(
+  max_token_count: Int,
+  token_rate: Int,
+  refill_period_ms: Int,
+) -> Result(BucketState, Nil) {
+  case max_token_count > 0 && token_rate > 0 && refill_period_ms > 0 {
     False -> Error(Nil)
     True ->
       Ok(BucketState(
@@ -72,6 +94,7 @@ pub fn new(max_token_count: Int, token_rate: Int) -> Result(BucketState, Nil) {
         token_rate: token_rate,
         token_count: int.to_float(max_token_count),
         last_update: None,
+        refill_period_ms: refill_period_ms,
       ))
   }
 }
@@ -83,7 +106,9 @@ pub fn refill(state: BucketState, now: Int) -> BucketState {
     None -> 0
     Some(last_update) -> int.max(0, now - last_update)
   }
-  let tokens_to_add = int.to_float(state.token_rate * time_diff) /. 1000.0
+  let tokens_to_add =
+    int.to_float(state.token_rate * time_diff)
+    /. int.to_float(state.refill_period_ms)
   let token_count =
     { state.token_count +. tokens_to_add }
     |> float.min(int.to_float(state.max_token_count))
@@ -119,7 +144,8 @@ pub fn hit(state: BucketState, now: Int) -> #(Result(Nil, Nil), BucketState) {
 /// Convert a BucketState to a list of string key-value pairs.
 ///
 /// Useful for serializing bucket state into external stores (e.g. Redis HSET).
-/// Keys: `"tc"` (token count), `"lu"` (last update), `"mt"` (max tokens), `"tr"` (token rate).
+/// Keys: `"tc"` (token count), `"lu"` (last update), `"mt"` (max tokens), `"tr"` (token rate),
+/// `"rp"` (refill period in milliseconds).
 ///
 pub fn to_pairs(state: BucketState) -> List(#(String, String)) {
   let lu = case state.last_update {
@@ -131,13 +157,16 @@ pub fn to_pairs(state: BucketState) -> List(#(String, String)) {
     #(key_last_update, lu),
     #(key_max_tokens, int.to_string(state.max_token_count)),
     #(key_token_rate, int.to_string(state.token_rate)),
+    #(key_refill_period, int.to_string(state.refill_period_ms)),
   ]
 }
 
 /// Parse a BucketState from a list of string key-value pairs.
 ///
 /// This is the inverse of `to_pairs`. Returns `Error(Nil)` if any required
-/// field is missing or cannot be parsed.
+/// field is missing or cannot be parsed. A missing `"rp"` field means a
+/// refill period of one second, so state written by earlier versions still
+/// parses.
 ///
 pub fn from_pairs(pairs: List(#(String, String))) -> Result(BucketState, Nil) {
   use tc_str <- result.try(list.key_find(pairs, key_token_count))
@@ -147,6 +176,10 @@ pub fn from_pairs(pairs: List(#(String, String))) -> Result(BucketState, Nil) {
   use tc <- result.try(float.parse(tc_str))
   use mt <- result.try(int.parse(mt_str))
   use tr <- result.try(int.parse(tr_str))
+  use rp <- result.try(case list.key_find(pairs, key_refill_period) {
+    Ok(rp_str) -> int.parse(rp_str)
+    Error(_) -> Ok(default_refill_period_ms)
+  })
   let lu = case lu_str {
     "" -> None
     s ->
@@ -160,6 +193,7 @@ pub fn from_pairs(pairs: List(#(String, String))) -> Result(BucketState, Nil) {
     last_update: lu,
     max_token_count: mt,
     token_rate: tr,
+    refill_period_ms: rp,
   ))
 }
 
@@ -169,10 +203,11 @@ pub fn from_pairs(pairs: List(#(String, String))) -> Result(BucketState, Nil) {
 /// minimum of 60 seconds.
 ///
 pub fn compute_ttl(b: BucketState) -> Int {
-  case b.token_rate > 0 {
+  case b.token_rate > 0 && b.refill_period_ms > 0 {
     True -> {
+      let refill_ms = b.max_token_count * b.refill_period_ms
       let refill_seconds =
-        { b.max_token_count + b.token_rate - 1 } / b.token_rate
+        { refill_ms + b.token_rate * 1000 - 1 } / { b.token_rate * 1000 }
       int.max(refill_seconds * 2, 60)
     }
     False -> 60

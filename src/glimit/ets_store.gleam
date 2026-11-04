@@ -29,15 +29,17 @@ pub fn new() -> EtsStore {
 
 /// Create a new ETS-backed store with automatic periodic sweeping.
 ///
-/// Full and idle buckets are removed every `sweep_interval_ms` milliseconds.
-/// Set `max_idle_ms` to `None` to disable idle eviction.
+/// Full buckets are removed every `sweep_interval_ms` milliseconds.
+///
+/// `max_idle_ms` is ignored. A bucket is kept until it has refilled, because
+/// removing it earlier would give an idle client a full burst back.
 ///
 pub fn new_with_sweep(
-  max_idle_ms max_idle_ms: Option(Int),
+  max_idle_ms _max_idle_ms: Option(Int),
   sweep_interval_ms sweep_interval_ms: Int,
 ) -> EtsStore {
   let store = new()
-  start_sweep_timer(store, max_idle_ms, sweep_interval_ms)
+  start_sweep_timer(store, sweep_interval_ms)
   store
 }
 
@@ -58,16 +60,17 @@ pub fn make_store(store: EtsStore) -> bucket.Store {
   )
 }
 
-/// Sweep full and idle buckets from the store.
+/// Sweep full buckets from the store.
+///
+/// A bucket is removed only once it has refilled, since a new bucket starts
+/// full and removing it changes nothing. `max_idle_ms` is ignored.
 ///
 pub fn sweep(
   store store: EtsStore,
   now now: Int,
-  max_idle_ms max_idle_ms: Option(Int),
+  max_idle_ms _max_idle_ms: Option(Int),
 ) -> Int {
-  ets_sweep(store.table, fn(_key, state) {
-    bucket.is_full(state, now) || is_idle(state, now, max_idle_ms)
-  })
+  ets_sweep(store.table, fn(_key, state) { bucket.is_full(state, now) })
 }
 
 /// Return the number of tracked identifiers.
@@ -82,26 +85,11 @@ pub fn remove(store: EtsStore, key: String) -> Result(Nil, Nil) {
   ets_delete(store.table, key)
 }
 
-fn is_idle(state: BucketState, now: Int, max_idle_ms: Option(Int)) -> Bool {
-  case max_idle_ms {
-    None -> False
-    Some(threshold) ->
-      case state.last_update {
-        None -> True
-        Some(last_update) -> now - last_update > threshold
-      }
-  }
-}
-
-fn start_sweep_timer(
-  store: EtsStore,
-  max_idle_ms: Option(Int),
-  sweep_interval_ms: Int,
-) -> Nil {
+fn start_sweep_timer(store: EtsStore, sweep_interval_ms: Int) -> Nil {
   let store_ref = store
   ets_set_interval(sweep_interval_ms, fn() {
     let now = utils.now()
-    sweep(store: store_ref, now: now, max_idle_ms: max_idle_ms)
+    sweep(store: store_ref, now: now, max_idle_ms: None)
     Nil
   })
 }

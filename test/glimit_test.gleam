@@ -312,7 +312,9 @@ pub fn sub_second_remainder_non_divisible_rate_test() {
 pub fn build_missing_per_second_test() {
   glimit.new()
   |> glimit.build
-  |> should.equal(Error("`per_second` rate limit is required"))
+  |> should.equal(Error(
+    "a rate limit (`per_second`, `per_minute` or `per_hour`) is required",
+  ))
 }
 
 pub fn build_missing_identifier_test() {
@@ -812,10 +814,147 @@ pub fn bucket_to_pairs_from_pairs_roundtrip_test() {
   let assert Ok(restored) = bucket.from_pairs(pairs)
   restored.max_token_count |> should.equal(state.max_token_count)
   restored.token_rate |> should.equal(state.token_rate)
+  restored.refill_period_ms |> should.equal(state.refill_period_ms)
 }
 
 pub fn bucket_from_pairs_missing_field_test() {
   let pairs = [#("tc", "5.0"), #("lu", ""), #("mt", "10")]
   // Missing "tr" field
   bucket.from_pairs(pairs) |> should.be_error
+}
+
+pub fn per_hour_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_hour(20)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  // The default burst is the hourly budget
+  let limiter = set_now(limiter, 0)
+  list.repeat(Nil, 20)
+  |> list.each(fn(_) { glimit.hit(limiter, "id") |> should.be_ok })
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+
+  // One token refills every 180 seconds
+  let limiter = set_now(limiter, 179_999)
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+
+  let limiter = set_now(limiter, 180_000)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+}
+
+pub fn per_hour_fn_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_hour_fn(fn(id) {
+      case id {
+        "a" -> 2
+        _ -> 1
+      }
+    })
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.equal(Error(glimit.RateLimited))
+  glimit.hit(limiter, "b") |> should.be_ok
+  glimit.hit(limiter, "b") |> should.equal(Error(glimit.RateLimited))
+
+  // "a" refills every 30 minutes, "b" every hour
+  let limiter = set_now(limiter, 1_800_000)
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "b") |> should.equal(Error(glimit.RateLimited))
+}
+
+pub fn per_minute_matches_per_second_test() {
+  let assert Ok(per_minute) =
+    glimit.new()
+    |> glimit.per_minute(60)
+    |> glimit.burst_limit(3)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+  let assert Ok(per_second) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.burst_limit(3)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let times = [0, 0, 0, 0, 500, 999, 1000, 1000, 2500, 2500, 2500, 9000]
+  let per_second_hits = hits_at(per_second, times)
+  hits_at(per_minute, times) |> should.equal(per_second_hits)
+  per_second_hits
+  |> should.equal([
+    True, True, True, False, False, False, True, False, True, False, False, True,
+  ])
+}
+
+pub fn per_minute_fn_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_minute_fn(fn(_) { 2 })
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+
+  let limiter = set_now(limiter, 30_000)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+}
+
+pub fn last_rate_wins_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(10)
+    |> glimit.per_hour(1)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "id") |> should.be_ok
+  let limiter = set_now(limiter, 10_000)
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+}
+
+pub fn per_hour_store_test() {
+  let test_store = new_test_store()
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_hour(2)
+    |> glimit.store(test_store)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+
+  let limiter = set_now(limiter, 1_800_000)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+}
+
+fn hits_at(limiter: glimit.RateLimiter(a, b, String), times: List(Int)) {
+  list.map(times, fn(now) {
+    case glimit.hit(set_now(limiter, now), "id") {
+      Ok(Nil) -> True
+      Error(_) -> False
+    }
+  })
 }

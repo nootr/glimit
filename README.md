@@ -61,6 +61,21 @@ case glimit.hit(limiter, "user_123") {
 }
 ```
 
+Rates can also be set per minute or per hour, which suits budgets such as
+"20 requests per hour per IP address". Tokens refill continuously, so
+`per_hour(20)` allows a burst of 20 and then one more request every three
+minutes:
+
+```gleam
+import glimit
+
+let limiter =
+  glimit.new()
+  |> glimit.per_hour(20)
+  |> glimit.identifier(fn(request) { request.ip })
+  |> glimit.on_limit_exceeded(fn(_) { "Hourly limit reached" })
+```
+
 More practical examples can be found in the `examples/` directory, such as Wisp or Mist servers, or a Redis backend.
 
 
@@ -79,7 +94,7 @@ Every hit goes through the pluggable `Store` interface (`lock_and_get` / `set_an
 
 * **Default (ETS)**: Direct table operations per hit. No actor overhead.
 * **Fail-open**: If the store is unavailable or a lock cannot be acquired, the request is allowed through rather than rejected.
-* **Sweep**: Full and idle buckets are automatically swept every 10 seconds.
+* **Sweep**: Buckets that have refilled to full are automatically swept every 10 seconds. A partly used bucket is kept until it refills, so waiting does not reset a client's limit early.
 
 
 ## Documentation
