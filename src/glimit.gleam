@@ -1,5 +1,6 @@
 //// This module provides a rate limiter that can be used to limit the number of
-//// requests or function calls per second for a given identifier.
+//// requests or function calls per second, minute or hour for a given
+//// identifier.
 ////
 //// By default, rate limit state is stored in an ETS table with lock-free
 //// atomic operations. A periodic sweep removes full or idle buckets to
@@ -14,10 +15,12 @@
 ////
 //// The rate limits are configured using the following two options:
 ////
-//// - `per_second`: The rate of new available tokens per second. Think of this
-////   as the steady state rate limit.
+//// - `per_second`, `per_minute` or `per_hour`: The rate of new available
+////   tokens per second, minute or hour. Think of this as the steady state rate
+////   limit.
 //// - `burst_limit`: The maximum number of available tokens. Think of this as
-////   the burst rate limit. The default value is the `per_second` rate limit.
+////   the burst rate limit. The default value is the number of tokens per
+////   second, minute or hour set by the rate limit.
 ////
 //// The rate limiter can be applied to a function or handler using the `apply`
 //// function, which returns a new function that checks the rate limit before
@@ -106,7 +109,8 @@ pub type RateLimiter(a, b, id) {
   RateLimiter(
     on_limit_exceeded: fn(a) -> b,
     identifier: fn(a) -> id,
-    per_second: fn(id) -> Int,
+    token_rate: fn(id) -> Int,
+    refill_period_ms: Int,
     burst_limit: fn(id) -> Int,
     store: Store,
     ets_store: Option(EtsStore),
@@ -118,7 +122,8 @@ pub type RateLimiter(a, b, id) {
 ///
 pub type RateLimiterBuilder(a, b, id) {
   RateLimiterBuilder(
-    per_second: Option(fn(id) -> Int),
+    token_rate: Option(fn(id) -> Int),
+    refill_period_ms: Int,
     burst_limit: Option(fn(id) -> Int),
     identifier: Option(fn(a) -> id),
     on_limit_exceeded: Option(fn(a) -> b),
@@ -131,7 +136,8 @@ pub type RateLimiterBuilder(a, b, id) {
 ///
 pub fn new() -> RateLimiterBuilder(a, b, id) {
   RateLimiterBuilder(
-    per_second: None,
+    token_rate: None,
+    refill_period_ms: 1000,
     burst_limit: None,
     identifier: None,
     on_limit_exceeded: None,
@@ -163,7 +169,7 @@ pub fn per_second(
   limiter: RateLimiterBuilder(a, b, id),
   limit: Int,
 ) -> RateLimiterBuilder(a, b, id) {
-  RateLimiterBuilder(..limiter, per_second: Some(fn(_) { limit }))
+  per_second_fn(limiter, fn(_) { limit })
 }
 
 /// Set the rate limit per second, based on the identifier.
@@ -190,14 +196,135 @@ pub fn per_second_fn(
   limiter: RateLimiterBuilder(a, b, id),
   limit_fn: fn(id) -> Int,
 ) -> RateLimiterBuilder(a, b, id) {
-  RateLimiterBuilder(..limiter, per_second: Some(limit_fn))
+  rate_fn(limiter, limit_fn, 1000)
+}
+
+/// Set the rate of new available tokens per minute.
+///
+/// Tokens are added continuously: `per_minute(30)` adds one token every two
+/// seconds. This value is also used as the default value for the
+/// `burst_limit` function. Setting `per_minute` replaces any earlier
+/// `per_second` or `per_hour` rate.
+///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.per_minute(30)
+/// ```
+///
+pub fn per_minute(
+  limiter: RateLimiterBuilder(a, b, id),
+  limit: Int,
+) -> RateLimiterBuilder(a, b, id) {
+  per_minute_fn(limiter, fn(_) { limit })
+}
+
+/// Set the rate limit per minute, based on the identifier.
+///
+/// Note: this function is evaluated once when a bucket is first created for an
+/// identifier. If the function returns a different value later, existing buckets
+/// are not affected until they are swept (due to idleness or being full) and
+/// re-created on the next hit.
+///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.identifier(fn(request) { request.user_id })
+///   |> glimit.per_minute_fn(fn(user_id) {
+///     db.get_rate_limit(user_id)
+///   })
+/// ```
+///
+pub fn per_minute_fn(
+  limiter: RateLimiterBuilder(a, b, id),
+  limit_fn: fn(id) -> Int,
+) -> RateLimiterBuilder(a, b, id) {
+  rate_fn(limiter, limit_fn, 60_000)
+}
+
+/// Set the rate of new available tokens per hour.
+///
+/// Tokens are added continuously: `per_hour(20)` adds one token every three
+/// minutes. This value is also used as the default value for the
+/// `burst_limit` function. Setting `per_hour` replaces any earlier
+/// `per_second` or `per_minute` rate.
+///
+/// The default ETS store evicts buckets that have been idle for 60 seconds,
+/// which resets them to full. Set `max_idle` to at least the time a bucket
+/// takes to refill (one hour for a default burst) so that an idle client
+/// cannot regain its budget early.
+///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.per_hour(20)
+///   |> glimit.max_idle(3600)
+/// ```
+///
+pub fn per_hour(
+  limiter: RateLimiterBuilder(a, b, id),
+  limit: Int,
+) -> RateLimiterBuilder(a, b, id) {
+  per_hour_fn(limiter, fn(_) { limit })
+}
+
+/// Set the rate limit per hour, based on the identifier.
+///
+/// Note: this function is evaluated once when a bucket is first created for an
+/// identifier. If the function returns a different value later, existing buckets
+/// are not affected until they are swept (due to idleness or being full) and
+/// re-created on the next hit.
+///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.identifier(fn(request) { request.user_id })
+///   |> glimit.per_hour_fn(fn(user_id) {
+///     db.get_hourly_rate_limit(user_id)
+///   })
+///   |> glimit.max_idle(3600)
+/// ```
+///
+pub fn per_hour_fn(
+  limiter: RateLimiterBuilder(a, b, id),
+  limit_fn: fn(id) -> Int,
+) -> RateLimiterBuilder(a, b, id) {
+  rate_fn(limiter, limit_fn, 3_600_000)
+}
+
+fn rate_fn(
+  limiter: RateLimiterBuilder(a, b, id),
+  limit_fn: fn(id) -> Int,
+  refill_period_ms: Int,
+) -> RateLimiterBuilder(a, b, id) {
+  RateLimiterBuilder(
+    ..limiter,
+    token_rate: Some(limit_fn),
+    refill_period_ms: refill_period_ms,
+  )
 }
 
 /// Set the maximum number of available tokens.
 ///
 /// The maximum number of available tokens is the maximum number of requests that can be
 /// made in a single burst when the bucket is full. The default value is the same as the
-/// rate limit per second.
+/// rate limit per second, minute or hour.
 ///
 /// # Example
 ///
@@ -251,10 +378,11 @@ pub fn burst_limit_fn(
 /// during periodic sweeps. The default is 60 seconds. Set to `0` to disable
 /// idle eviction entirely.
 ///
-/// For rate limiters with a high `burst_limit` relative to `per_second`, you
-/// may want to increase this value so that partially-refilled buckets are not
-/// evicted prematurely. A good rule of thumb is
-/// `burst_limit / per_second` seconds.
+/// For rate limiters with a high `burst_limit` relative to `per_second`, or
+/// that use `per_minute` or `per_hour`, you may want to increase this value so
+/// that partially-refilled buckets are not evicted prematurely. A good rule of
+/// thumb is the time a bucket takes to refill: `burst_limit / per_second`
+/// seconds, or `3600 * burst_limit / per_hour` seconds.
 ///
 /// # Example
 ///
@@ -353,13 +481,15 @@ fn store_hit(
   key: String,
   max_token_count: Int,
   token_rate: Int,
+  refill_period_ms: Int,
 ) -> Result(Nil, HitError) {
   use maybe_bucket <- result.try(
     store.lock_and_get(key) |> result.replace_error(StoreLockFailed),
   )
   let b = case maybe_bucket {
     Some(b) -> Ok(b)
-    None -> bucket.new(max_token_count, token_rate)
+    None ->
+      bucket.new_with_period(max_token_count, token_rate, refill_period_ms)
   }
   case b {
     Error(_) -> {
@@ -390,13 +520,16 @@ fn store_hit(
 pub fn build(
   config: RateLimiterBuilder(a, b, id),
 ) -> Result(RateLimiter(a, b, id), String) {
-  use per_second <- result.try(case config.per_second {
-    Some(per_second) -> Ok(per_second)
-    None -> Error("`per_second` rate limit is required")
+  use token_rate <- result.try(case config.token_rate {
+    Some(token_rate) -> Ok(token_rate)
+    None ->
+      Error(
+        "a rate limit (`per_second`, `per_minute` or `per_hour`) is required",
+      )
   })
   let burst_limit = case config.burst_limit {
     Some(burst_limit) -> burst_limit
-    None -> per_second
+    None -> token_rate
   }
   use identifier <- result.try(case config.identifier {
     Some(identifier) -> Ok(identifier)
@@ -422,7 +555,8 @@ pub fn build(
   Ok(RateLimiter(
     on_limit_exceeded: on_limit_exceeded,
     identifier: identifier,
-    per_second: per_second,
+    token_rate: token_rate,
+    refill_period_ms: config.refill_period_ms,
     burst_limit: burst_limit,
     store: store,
     ets_store: es,
@@ -440,9 +574,17 @@ pub fn hit(
   case utils.rescue(fn() { limiter.burst_limit(identifier) }) {
     Error(_) -> Error(Unavailable)
     Ok(max) ->
-      case utils.rescue(fn() { limiter.per_second(identifier) }) {
+      case utils.rescue(fn() { limiter.token_rate(identifier) }) {
         Error(_) -> Error(Unavailable)
-        Ok(rate) -> store_hit(limiter.store, limiter.now, key, max, rate)
+        Ok(rate) ->
+          store_hit(
+            limiter.store,
+            limiter.now,
+            key,
+            max,
+            rate,
+            limiter.refill_period_ms,
+          )
       }
   }
 }

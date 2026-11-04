@@ -61,6 +61,23 @@ case glimit.hit(limiter, "user_123") {
 }
 ```
 
+Rates can also be set per minute or per hour, which suits budgets such as
+"20 requests per hour per IP address". Tokens refill continuously, so
+`per_hour(20)` allows a burst of 20 and then one more request every three
+minutes. Raise `max_idle` to the refill time so that the ETS sweep does not
+reset a partly used bucket:
+
+```gleam
+import glimit
+
+let limiter =
+  glimit.new()
+  |> glimit.per_hour(20)
+  |> glimit.max_idle(3600)
+  |> glimit.identifier(fn(request) { request.ip })
+  |> glimit.on_limit_exceeded(fn(_) { "Hourly limit reached" })
+```
+
 More practical examples can be found in the `examples/` directory, such as Wisp or Mist servers, or a Redis backend.
 
 
