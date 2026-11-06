@@ -127,8 +127,8 @@ fn get(
 }
 
 fn unlock(conn: valkyrie.Connection, key: String) -> Result(Nil, Nil) {
-  let _ =
-    when_connected(fn() { valkyrie.del(conn, [lock_key(key)], default_timeout) })
+  let release = fn() { valkyrie.del(conn, [lock_key(key)], default_timeout) }
+  let _ = when_connected(release)
   Ok(Nil)
 }
 
