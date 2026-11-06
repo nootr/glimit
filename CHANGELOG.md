@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## Unreleased
+## 1.7.0 - 2026-11-06
 
 ### Added
 
@@ -13,13 +13,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `bucket.hit_all(states, now)` consumes a token from every bucket, or from none of them.
 - `glimit.Rate` holds a token rate and its refill period.
 - `glimit.key_prefix` keeps rate limiters apart that share a store, identifier and period.
-
-### Fixed
-
-- Rate and burst limit functions now run only when a bucket is created, as documented. They used to run on every hit. The burst limit function runs at most once per hit. With an external store they run while the bucket is locked.
-- A failed `set_and_unlock` no longer goes unnoticed: an allowed hit returns `Unavailable`. The `Store` docs now require `set_and_unlock` to release the lock, also when it fails.
-- A store that crashes no longer crashes the request. A crash in `lock_and_get` fails open, and a crash in `set_and_unlock` is handled like a failed save.
-- The Redis example uses a connection pool and waits for held locks. Its single shared connection and immediate lock failures let most concurrent requests bypass the limit. It also reports a failed `EXPIRE`.
 
 ### Changed
 
@@ -30,6 +23,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `glimit.get_count` and `ets_store.get_count` count buckets, of which an identifier can have one per rate. `glimit.remove` removes all buckets of an identifier.
 - `RateLimiter` and `RateLimiterBuilder` replace the `token_rate` and `refill_period_ms` fields with `rates`, `RateLimiter.burst_limit` is now an `Option`, and both have a new `key_prefix` field. The builder functions are unchanged.
 - The `Store` docs now require adapters to be safe to call from multiple processes, and `lock_and_get` to wait briefly for a held lock.
+
+### Fixed
+
+- Rate and burst limit functions now run only when a bucket is created, as documented. They used to run on every hit. The burst limit function runs at most once per hit. With an external store they run while the bucket is locked.
+- A failed `set_and_unlock` no longer goes unnoticed: an allowed hit returns `Unavailable`. The `Store` docs now require `set_and_unlock` to release the lock, also when it fails.
+- A store that crashes no longer crashes the request. A crash in `lock_and_get` fails open, and a crash in `set_and_unlock` is handled like a failed save.
+- The Redis example uses a connection pool and waits for held locks. Its single shared connection and immediate lock failures let most concurrent requests bypass the limit. It also reports a failed `EXPIRE`.
 
 
 ## 1.6.0 - 2026-11-04
