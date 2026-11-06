@@ -76,6 +76,25 @@ let limiter =
   |> glimit.on_limit_exceeded(fn(_) { "Hourly limit reached" })
 ```
 
+Rates of different periods can be combined. A request must then pass all of
+them, and only spends tokens if it does. Setting a rate for a period that
+already has one replaces it:
+
+```gleam
+import glimit
+
+let limiter =
+  glimit.new()
+  |> glimit.per_second(10)
+  |> glimit.per_hour(1000)
+  |> glimit.identifier(fn(request) { request.ip })
+  |> glimit.on_limit_exceeded(fn(_) { "Rate limit reached" })
+```
+
+`burst_limit` is always the maximum number of requests in a single burst: it
+sets the bucket size of the shortest period. Buckets of longer periods hold at
+least their own rate, so a small burst limit does not shrink them.
+
 More practical examples can be found in the `examples/` directory, such as Wisp or Mist servers, or a Redis backend.
 
 
@@ -90,7 +109,7 @@ See [`examples/redis/`](https://github.com/nootr/glimit/tree/main/examples/redis
 
 ## Performance
 
-Every hit goes through the pluggable `Store` interface (`lock_and_get` / `set_and_unlock`).
+Every hit goes through the pluggable `Store` interface (`lock_and_get` / `set_and_unlock`), once per rate.
 
 * **Default (ETS)**: Direct table operations per hit. No actor overhead.
 * **Fail-open**: If the store is unavailable or a lock cannot be acquired, the request is allowed through rather than rejected.

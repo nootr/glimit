@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## Unreleased
+
+### Added
+
+- Rates of different periods can be combined, such as `per_second(10) |> per_hour(1000)`. A request must pass all of them and only spends tokens if it does.
+- `bucket.hit_all(states, now)` consumes a token from every bucket, or from none of them.
+- `glimit.Rate` holds a token rate and its refill period.
+
+### Changed
+
+- `per_second`, `per_minute` and `per_hour` (and their `_fn` variants) no longer replace a rate of a different period. Limiters that set rates for multiple periods now enforce all of them instead of only the last one. Setting a rate for the same period still replaces it.
+- With multiple rates, `burst_limit` sets the bucket size of the shortest period. Buckets of longer periods hold at least their own rate.
+- With multiple rates, each longer period stores its bucket under the key `glimit:<identifier>:<refill period in ms>`. The shortest period keeps the existing key.
+- `glimit.get_count` and `ets_store.get_count` count buckets, of which an identifier can have one per rate. `glimit.remove` removes all buckets of an identifier.
+- `RateLimiter` and `RateLimiterBuilder` replace the `token_rate` and `refill_period_ms` fields with `rates`, and `RateLimiter.burst_limit` is now an `Option`. The builder functions are unchanged.
+
+
 ## 1.6.0 - 2026-11-04
 
 ### Added

@@ -73,13 +73,13 @@ pub fn sweep(
   ets_sweep(store.table, fn(_key, state) { bucket.is_full(state, now) })
 }
 
-/// Return the number of tracked identifiers.
+/// Return the number of tracked buckets.
 ///
 pub fn get_count(store: EtsStore) -> Int {
   ets_size(store.table)
 }
 
-/// Remove an identifier from the store.
+/// Remove a bucket from the store.
 ///
 pub fn remove(store: EtsStore, key: String) -> Result(Nil, Nil) {
   ets_delete(store.table, key)

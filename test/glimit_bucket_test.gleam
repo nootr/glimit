@@ -1,3 +1,5 @@
+import gleam/list
+import gleam/option
 import gleeunit/should
 import glimit/bucket
 
@@ -127,4 +129,38 @@ fn drain(b: bucket.BucketState, now: Int, count: Int) -> bucket.BucketState {
       drain(b, now, count - 1)
     }
   }
+}
+
+pub fn hit_all_consumes_from_every_bucket_test() {
+  let assert Ok(a) = bucket.new(2, 2)
+  let assert Ok(b) = bucket.new_with_period(3, 3, 3_600_000)
+
+  let #(result, states) = bucket.hit_all([a, b], 0)
+  result |> should.equal(Ok(Nil))
+  states
+  |> list.map(fn(state) { state.token_count })
+  |> should.equal([1.0, 2.0])
+}
+
+pub fn hit_all_consumes_nothing_when_a_bucket_is_empty_test() {
+  let assert Ok(a) = bucket.new(2, 2)
+  let assert Ok(b) = bucket.new_with_period(1, 1, 3_600_000)
+  let b = bucket.BucketState(..b, token_count: 0.0)
+
+  let #(result, states) = bucket.hit_all([a, b], 0)
+  result |> should.equal(Error(Nil))
+  states
+  |> list.map(fn(state) { state.token_count })
+  |> should.equal([2.0, 0.0])
+}
+
+pub fn hit_all_refills_before_checking_test() {
+  let assert Ok(a) = bucket.new(2, 2)
+  let a = bucket.BucketState(..a, token_count: 0.0, last_update: option.Some(0))
+
+  let #(result, states) = bucket.hit_all([a], 500)
+  result |> should.equal(Ok(Nil))
+  states
+  |> list.map(fn(state) { state.token_count })
+  |> should.equal([0.0])
 }

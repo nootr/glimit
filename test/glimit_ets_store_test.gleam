@@ -259,6 +259,61 @@ pub fn ets_store_default_test() {
   func(Nil) |> should.equal("Stop!")
 }
 
+pub fn ets_store_combined_rates_have_a_bucket_per_rate_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.per_hour(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.get_count(limiter) |> should.equal(2)
+}
+
+pub fn ets_store_remove_removes_every_rate_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.per_hour(2)
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "a") |> should.be_ok
+  glimit.hit(limiter, "a") |> should.equal(Error(glimit.RateLimited))
+
+  glimit.remove(limiter, "a")
+  glimit.get_count(limiter) |> should.equal(0)
+  glimit.hit(limiter, "a") |> should.be_ok
+}
+
+pub fn ets_store_sweep_keeps_longer_period_of_combined_rates_test() {
+  let es = ets_store.new()
+
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.per_hour(2)
+    |> glimit.store(ets_store.make_store(es))
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(set_now(limiter, 0), "a") |> should.be_ok
+
+  // The per-second bucket has refilled, the per-hour bucket has not
+  ets_store.sweep(store: es, now: 1000, max_idle_ms: option.None)
+  |> should.equal(1)
+  ets_store.get_count(es) |> should.equal(1)
+
+  glimit.hit(set_now(limiter, 1000), "a") |> should.be_ok
+  glimit.hit(set_now(limiter, 2000), "a")
+  |> should.equal(Error(glimit.RateLimited))
+}
+
 fn set_now(
   limiter: glimit.RateLimiter(a, b, id),
   now: Int,

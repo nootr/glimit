@@ -16,7 +16,8 @@
 ////
 //// - `per_second`, `per_minute` or `per_hour`: The rate of new available
 ////   tokens per second, minute or hour. Think of this as the steady state rate
-////   limit.
+////   limit. Rates of different periods can be combined; a request must then
+////   pass all of them.
 //// - `burst_limit`: The maximum number of available tokens. Think of this as
 ////   the burst rate limit. The default value is the number of tokens per
 ////   second, minute or hour set by the rate limit.
@@ -41,6 +42,25 @@
 ////   fn(_request) { "Hello, world!" }
 ////   |> glimit.apply(limiter)
 //// ```
+////
+//// # Combining rates
+////
+//// Rates of different periods apply together, in any order. Setting a rate for
+//// a period that already has one replaces it. Each period has its own bucket,
+//// and a request only spends tokens if every bucket has one available.
+////
+//// ```gleam
+//// let limiter =
+////   glimit.new()
+////   |> glimit.per_second(10)
+////   |> glimit.per_hour(1000)
+////   |> glimit.identifier(fn(request) { request.ip })
+////   |> glimit.on_limit_exceeded(fn(_request) { "Rate limit reached" })
+//// ```
+////
+//// `burst_limit` is always the maximum number of requests in a single burst: it
+//// sets the bucket size of the shortest period. Buckets of longer periods hold
+//// at least their own rate, so a small burst limit does not shrink them.
 ////
 //// # Multi-argument functions
 ////
@@ -76,6 +96,8 @@
 //// [valkyrie](https://hexdocs.pm/valkyrie/).
 ////
 
+import gleam/int
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
@@ -102,18 +124,34 @@ pub type HitError {
   StoreLockFailed
 }
 
+/// A number of tokens generated per refill period.
+///
+pub type Rate(id) {
+  Rate(token_rate: fn(id) -> Int, refill_period_ms: Int)
+}
+
 /// A rate limiter.
 ///
 pub type RateLimiter(a, b, id) {
   RateLimiter(
     on_limit_exceeded: fn(a) -> b,
     identifier: fn(a) -> id,
-    token_rate: fn(id) -> Int,
-    refill_period_ms: Int,
-    burst_limit: fn(id) -> Int,
+    /// The rates to enforce, shortest period first.
+    ///
+    rates: List(Rate(id)),
+    burst_limit: Option(fn(id) -> Int),
     store: Store,
     ets_store: Option(EtsStore),
     now: fn() -> Int,
+  )
+}
+
+type BucketConfig {
+  BucketConfig(
+    key: String,
+    max_token_count: Int,
+    token_rate: Int,
+    refill_period_ms: Int,
   )
 }
 
@@ -121,8 +159,7 @@ pub type RateLimiter(a, b, id) {
 ///
 pub type RateLimiterBuilder(a, b, id) {
   RateLimiterBuilder(
-    token_rate: Option(fn(id) -> Int),
-    refill_period_ms: Int,
+    rates: List(Rate(id)),
     burst_limit: Option(fn(id) -> Int),
     identifier: Option(fn(a) -> id),
     on_limit_exceeded: Option(fn(a) -> b),
@@ -135,8 +172,7 @@ pub type RateLimiterBuilder(a, b, id) {
 ///
 pub fn new() -> RateLimiterBuilder(a, b, id) {
   RateLimiterBuilder(
-    token_rate: None,
-    refill_period_ms: 1000,
+    rates: [],
     burst_limit: None,
     identifier: None,
     on_limit_exceeded: None,
@@ -153,7 +189,8 @@ pub fn new() -> RateLimiterBuilder(a, b, id) {
 /// available tokens (or the burst rate limit).
 ///
 /// This value is also used as the default value for the `burst_limit` function.
-/// Setting `per_second` replaces any earlier `per_minute` or `per_hour` rate.
+/// Setting `per_second` again replaces the earlier per-second rate. A `per_minute`
+/// or `per_hour` rate is kept, and a request must pass all of them.
 ///
 /// # Example
 ///
@@ -174,7 +211,8 @@ pub fn per_second(
 
 /// Set the rate limit per second, based on the identifier.
 ///
-/// Setting `per_second_fn` replaces any earlier `per_minute` or `per_hour` rate.
+/// This replaces an earlier per-second rate. A `per_minute` or `per_hour` rate is
+/// kept, and a request must pass all of them.
 ///
 /// Note: this function is evaluated once when a bucket is first created for an
 /// identifier. If the function returns a different value later, existing buckets
@@ -205,8 +243,9 @@ pub fn per_second_fn(
 ///
 /// Tokens are added continuously: `per_minute(30)` adds one token every two
 /// seconds. This value is also used as the default value for the
-/// `burst_limit` function. Setting `per_minute` replaces any earlier
-/// `per_second` or `per_hour` rate.
+/// `burst_limit` function. Setting `per_minute` again replaces the earlier
+/// per-minute rate. A `per_second` or `per_hour` rate is kept, and a request
+/// must pass all of them.
 ///
 /// # Example
 ///
@@ -227,7 +266,8 @@ pub fn per_minute(
 
 /// Set the rate limit per minute, based on the identifier.
 ///
-/// Setting `per_minute_fn` replaces any earlier `per_second` or `per_hour` rate.
+/// This replaces an earlier per-minute rate. A `per_second` or `per_hour` rate is
+/// kept, and a request must pass all of them.
 ///
 /// Note: this function is evaluated once when a bucket is first created for an
 /// identifier. If the function returns a different value later, existing buckets
@@ -258,8 +298,9 @@ pub fn per_minute_fn(
 ///
 /// Tokens are added continuously: `per_hour(20)` adds one token every three
 /// minutes. This value is also used as the default value for the
-/// `burst_limit` function. Setting `per_hour` replaces any earlier
-/// `per_second` or `per_minute` rate.
+/// `burst_limit` function. Setting `per_hour` again replaces the earlier
+/// per-hour rate. A `per_second` or `per_minute` rate is kept, and a request
+/// must pass all of them.
 ///
 /// # Example
 ///
@@ -280,7 +321,8 @@ pub fn per_hour(
 
 /// Set the rate limit per hour, based on the identifier.
 ///
-/// Setting `per_hour_fn` replaces any earlier `per_second` or `per_minute` rate.
+/// This replaces an earlier per-hour rate. A `per_second` or `per_minute` rate is
+/// kept, and a request must pass all of them.
 ///
 /// Note: this function is evaluated once when a bucket is first created for an
 /// identifier. If the function returns a different value later, existing buckets
@@ -312,11 +354,18 @@ fn rate_fn(
   limit_fn: fn(id) -> Int,
   refill_period_ms: Int,
 ) -> RateLimiterBuilder(a, b, id) {
-  RateLimiterBuilder(
-    ..limiter,
-    token_rate: Some(limit_fn),
-    refill_period_ms: refill_period_ms,
-  )
+  let rate = Rate(token_rate: limit_fn, refill_period_ms: refill_period_ms)
+  let rates =
+    [
+      rate,
+      ..list.filter(limiter.rates, fn(existing) {
+        existing.refill_period_ms != refill_period_ms
+      })
+    ]
+    |> list.sort(by: fn(a, b) {
+      int.compare(a.refill_period_ms, b.refill_period_ms)
+    })
+  RateLimiterBuilder(..limiter, rates: rates)
 }
 
 /// Set the maximum number of available tokens.
@@ -324,6 +373,11 @@ fn rate_fn(
 /// The maximum number of available tokens is the maximum number of requests that can be
 /// made in a single burst when the bucket is full. The default value is the same as the
 /// rate limit per second, minute or hour.
+///
+/// With multiple rates, this sets the bucket size of the shortest period, so it is
+/// still the maximum number of requests in a single burst. Buckets of longer periods
+/// hold at least their own rate, so a small burst limit does not shrink them. Without
+/// a burst limit, each bucket holds its own rate.
 ///
 /// # Example
 ///
@@ -458,36 +512,110 @@ fn string_key(identifier: id) -> String {
   store_key_prefix <> string.inspect(identifier)
 }
 
+/// The shortest period keeps the plain key, so adding a longer rate to an
+/// existing limiter keeps its buckets.
+///
+fn bucket_key(identifier: id, rate_index: Int, rate: Rate(id)) -> String {
+  case rate_index {
+    0 -> string_key(identifier)
+    _ -> string_key(identifier) <> ":" <> int.to_string(rate.refill_period_ms)
+  }
+}
+
+fn max_token_count(burst: Option(Int), token_rate: Int, rate_index: Int) -> Int {
+  case burst, rate_index {
+    None, _ -> token_rate
+    Some(burst), 0 -> burst
+    Some(burst), _ -> int.max(burst, token_rate)
+  }
+}
+
+fn bucket_configs(
+  limiter: RateLimiter(a, b, id),
+  identifier: id,
+) -> Result(List(BucketConfig), Nil) {
+  use burst <- result.try(case limiter.burst_limit {
+    Some(burst_limit) ->
+      utils.rescue(fn() { burst_limit(identifier) })
+      |> result.map(Some)
+    None -> Ok(None)
+  })
+  limiter.rates
+  |> list.index_map(fn(rate, index) {
+    use token_rate <- result.map(
+      utils.rescue(fn() { rate.token_rate(identifier) }),
+    )
+    BucketConfig(
+      key: bucket_key(identifier, index, rate),
+      max_token_count: max_token_count(burst, token_rate, index),
+      token_rate: token_rate,
+      refill_period_ms: rate.refill_period_ms,
+    )
+  })
+  |> result.all
+}
+
+fn lock_bucket(
+  store: Store,
+  config: BucketConfig,
+) -> Result(bucket.BucketState, HitError) {
+  use maybe_bucket <- result.try(
+    store.lock_and_get(config.key) |> result.replace_error(StoreLockFailed),
+  )
+  case maybe_bucket {
+    Some(state) -> Ok(state)
+    None ->
+      case
+        bucket.new_with_period(
+          config.max_token_count,
+          config.token_rate,
+          config.refill_period_ms,
+        )
+      {
+        Ok(state) -> Ok(state)
+        Error(_) -> {
+          let _ = store.unlock(config.key)
+          Error(Unavailable)
+        }
+      }
+  }
+}
+
+/// Lock every bucket, in the order given. If a bucket cannot be locked, the
+/// buckets locked so far are released.
+///
+fn lock_buckets(
+  store: Store,
+  configs: List(BucketConfig),
+  locked: List(#(String, bucket.BucketState)),
+) -> Result(List(#(String, bucket.BucketState)), HitError) {
+  case configs {
+    [] -> Ok(locked)
+    [config, ..rest] ->
+      case lock_bucket(store, config) {
+        Ok(state) -> lock_buckets(store, rest, [#(config.key, state), ..locked])
+        Error(error) -> {
+          list.each(locked, fn(entry) { store.unlock(entry.0) })
+          Error(error)
+        }
+      }
+  }
+}
+
 fn store_hit(
   store: Store,
   now: fn() -> Int,
-  key: String,
-  max_token_count: Int,
-  token_rate: Int,
-  refill_period_ms: Int,
+  configs: List(BucketConfig),
 ) -> Result(Nil, HitError) {
-  use maybe_bucket <- result.try(
-    store.lock_and_get(key) |> result.replace_error(StoreLockFailed),
-  )
-  let b = case maybe_bucket {
-    Some(b) -> Ok(b)
-    None ->
-      bucket.new_with_period(max_token_count, token_rate, refill_period_ms)
-  }
-  case b {
-    Error(_) -> {
-      let _ = store.unlock(key)
-      Error(Unavailable)
-    }
-    Ok(b) -> {
-      let #(hit_result, new_b) = bucket.hit(b, now())
-      let ttl = bucket.compute_ttl(new_b)
-      let _ = store.set_and_unlock(key, new_b, ttl)
-      case hit_result {
-        Ok(Nil) -> Ok(Nil)
-        Error(Nil) -> Error(RateLimited)
-      }
-    }
+  use locked <- result.try(lock_buckets(store, configs, []))
+  let #(keys, states) = list.unzip(locked)
+  let #(hit_result, new_states) = bucket.hit_all(states, now())
+  list.map2(keys, new_states, fn(key, state) {
+    store.set_and_unlock(key, state, bucket.compute_ttl(state))
+  })
+  case hit_result {
+    Ok(Nil) -> Ok(Nil)
+    Error(Nil) -> Error(RateLimited)
   }
 }
 
@@ -503,17 +631,13 @@ fn store_hit(
 pub fn build(
   config: RateLimiterBuilder(a, b, id),
 ) -> Result(RateLimiter(a, b, id), String) {
-  use token_rate <- result.try(case config.token_rate {
-    Some(token_rate) -> Ok(token_rate)
-    None ->
+  use rates <- result.try(case config.rates {
+    [] ->
       Error(
         "a rate limit (`per_second`, `per_minute` or `per_hour`) is required",
       )
+    rates -> Ok(rates)
   })
-  let burst_limit = case config.burst_limit {
-    Some(burst_limit) -> burst_limit
-    None -> token_rate
-  }
   use identifier <- result.try(case config.identifier {
     Some(identifier) -> Ok(identifier)
     None -> Error("`identifier` function is required")
@@ -538,9 +662,8 @@ pub fn build(
   Ok(RateLimiter(
     on_limit_exceeded: on_limit_exceeded,
     identifier: identifier,
-    token_rate: token_rate,
-    refill_period_ms: config.refill_period_ms,
-    burst_limit: burst_limit,
+    rates: rates,
+    burst_limit: config.burst_limit,
     store: store,
     ets_store: es,
     now: utils.now,
@@ -553,22 +676,9 @@ pub fn hit(
   limiter: RateLimiter(a, b, id),
   identifier: id,
 ) -> Result(Nil, HitError) {
-  let key = string_key(identifier)
-  case utils.rescue(fn() { limiter.burst_limit(identifier) }) {
+  case bucket_configs(limiter, identifier) {
     Error(_) -> Error(Unavailable)
-    Ok(max) ->
-      case utils.rescue(fn() { limiter.token_rate(identifier) }) {
-        Error(_) -> Error(Unavailable)
-        Ok(rate) ->
-          store_hit(
-            limiter.store,
-            limiter.now,
-            key,
-            max,
-            rate,
-            limiter.refill_period_ms,
-          )
-      }
+    Ok(configs) -> store_hit(limiter.store, limiter.now, configs)
   }
 }
 
@@ -607,9 +717,9 @@ pub fn apply_built(
   }
 }
 
-/// Return the number of tracked identifiers in the ETS store.
+/// Return the number of tracked buckets in the ETS store.
 ///
-/// Returns 0 if the rate limiter uses an external store.
+/// An identifier has one bucket per rate, until a bucket is swept. Returns 0 if the rate limiter uses an external store.
 ///
 pub fn get_count(limiter: RateLimiter(a, b, id)) -> Int {
   case limiter.ets_store {
@@ -624,11 +734,10 @@ pub fn get_count(limiter: RateLimiter(a, b, id)) -> Int {
 ///
 pub fn remove(limiter: RateLimiter(a, b, id), identifier: id) -> Nil {
   case limiter.ets_store {
-    Some(es) -> {
-      let key = string_key(identifier)
-      let _ = ets_store.remove(es, key)
-      Nil
-    }
+    Some(es) ->
+      limiter.rates
+      |> list.index_map(fn(rate, index) { bucket_key(identifier, index, rate) })
+      |> list.each(ets_store.remove(es, _))
     None -> Nil
   }
 }
