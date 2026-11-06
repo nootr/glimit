@@ -109,7 +109,7 @@ pub fn ets_store_remove_test() {
   glimit.hit(limiter, "a") |> should.be_ok
   ets_store.get_count(es) |> should.equal(1)
 
-  ets_store.remove(es, "glimit:\"a\"") |> should.equal(Ok(Nil))
+  ets_store.remove(es, "glimit:\"a\":1000") |> should.equal(Ok(Nil))
   ets_store.get_count(es) |> should.equal(0)
 }
 

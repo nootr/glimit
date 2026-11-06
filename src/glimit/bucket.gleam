@@ -38,7 +38,8 @@ const default_refill_period_ms = 1000
 ///
 /// A rate limiter with multiple rates has one bucket per rate. It locks their
 /// keys in a fixed order, shortest period first, and releases all of them once
-/// the hit is done.
+/// the hit is done. A bucket whose lock cannot be acquired is skipped, and the
+/// other rates still apply.
 ///
 pub type Store {
   Store(

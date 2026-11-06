@@ -916,7 +916,7 @@ pub fn per_minute_fn_test() {
   glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 }
 
-pub fn last_rate_wins_test() {
+pub fn combined_rates_stricter_rate_applies_test() {
   let assert Ok(limiter) =
     glimit.new()
     |> glimit.per_second(10)
@@ -1054,7 +1054,7 @@ pub fn combined_rates_rejection_keeps_shorter_period_tokens_test() {
   hits_at(limiter, [0, 0, 0])
   |> should.equal([True, False, False])
 
-  let key = "glimit:\"id\""
+  let key = "glimit:\"id\":60000"
   let assert Ok(option.Some(state)) = test_store.lock_and_get(key)
   state.token_count |> should.equal(9.0)
 }
@@ -1136,7 +1136,7 @@ pub fn combined_rates_dynamic_test() {
   glimit.hit(limiter, "free") |> should.equal(Error(glimit.RateLimited))
 }
 
-pub fn combined_rates_invalid_rate_fails_open_test() {
+pub fn combined_rates_invalid_rate_keeps_other_rates_test() {
   let assert Ok(limiter) =
     glimit.new()
     |> glimit.per_second(1)
@@ -1145,11 +1145,26 @@ pub fn combined_rates_invalid_rate_fails_open_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.Unavailable))
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.Unavailable))
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 }
 
-pub fn combined_rates_panicking_rate_fails_open_test() {
+pub fn combined_rates_invalid_shortest_rate_keeps_other_rates_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(0)
+    |> glimit.per_hour(1)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+}
+
+pub fn combined_rates_panicking_rate_keeps_other_rates_test() {
   let assert Ok(limiter) =
     glimit.new()
     |> glimit.per_second(1)
@@ -1158,6 +1173,21 @@ pub fn combined_rates_panicking_rate_fails_open_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+}
+
+pub fn combined_rates_all_invalid_fails_open_test() {
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(0)
+    |> glimit.per_hour_fn(fn(_) { panic as "boom" })
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.Unavailable))
   glimit.hit(limiter, "id") |> should.equal(Error(glimit.Unavailable))
 }
 
@@ -1174,7 +1204,8 @@ pub fn combined_rates_store_keys_test() {
 
   glimit.hit(limiter, "id") |> should.be_ok
 
-  let assert Ok(option.Some(seconds)) = test_store.lock_and_get("glimit:\"id\"")
+  let assert Ok(option.Some(seconds)) =
+    test_store.lock_and_get("glimit:\"id\":1000")
   seconds.refill_period_ms |> should.equal(1000)
   seconds.max_token_count |> should.equal(2)
 
@@ -1184,21 +1215,36 @@ pub fn combined_rates_store_keys_test() {
   hours.max_token_count |> should.equal(3)
 }
 
-pub fn combined_rates_lock_failure_releases_earlier_locks_test() {
-  let unlocked = process.new_subject()
+pub fn combined_rates_lock_failure_keeps_other_rates_test() {
+  let test_store = new_test_store()
+  let failing_store =
+    bucket.Store(..test_store, lock_and_get: fn(key) {
+      case string.ends_with(key, ":3600000") {
+        True -> Error(Nil)
+        False -> test_store.lock_and_get(key)
+      }
+    })
+
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.per_hour(3)
+    |> glimit.store(failing_store)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  let limiter = set_now(limiter, 0)
+  glimit.hit(limiter, "id") |> should.be_ok
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
+}
+
+pub fn combined_rates_all_locks_failing_fails_open_test() {
   let failing_store =
     bucket.Store(
-      lock_and_get: fn(key) {
-        case string.ends_with(key, ":3600000") {
-          True -> Error(Nil)
-          False -> Ok(option.None)
-        }
-      },
+      lock_and_get: fn(_) { Error(Nil) },
       set_and_unlock: fn(_, _, _) { Ok(Nil) },
-      unlock: fn(key) {
-        process.send(unlocked, key)
-        Ok(Nil)
-      },
+      unlock: fn(_) { Ok(Nil) },
     )
 
   let assert Ok(limiter) =
@@ -1211,10 +1257,9 @@ pub fn combined_rates_lock_failure_releases_earlier_locks_test() {
     |> glimit.build
 
   glimit.hit(limiter, "id") |> should.equal(Error(glimit.StoreLockFailed))
-  process.receive(unlocked, 100) |> should.equal(Ok("glimit:\"id\""))
 }
 
-pub fn combined_rates_invalid_rate_releases_earlier_locks_test() {
+pub fn combined_rates_invalid_rate_releases_its_lock_test() {
   let unlocked = process.new_subject()
   let store =
     bucket.Store(
@@ -1235,10 +1280,33 @@ pub fn combined_rates_invalid_rate_releases_earlier_locks_test() {
     |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
     |> glimit.build
 
-  glimit.hit(limiter, "id") |> should.equal(Error(glimit.Unavailable))
+  glimit.hit(limiter, "id") |> should.be_ok
   process.receive(unlocked, 100)
   |> should.equal(Ok("glimit:\"id\":3600000"))
-  process.receive(unlocked, 100) |> should.equal(Ok("glimit:\"id\""))
+}
+
+pub fn adding_a_shorter_rate_does_not_reuse_longer_bucket_test() {
+  let test_store = new_test_store()
+  let assert Ok(hourly) =
+    glimit.new()
+    |> glimit.per_hour(1000)
+    |> glimit.store(test_store)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+  let assert Ok(combined) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.per_hour(1000)
+    |> glimit.store(test_store)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(set_now(hourly, 0), "id") |> should.be_ok
+
+  hits_at(combined, [0, 0])
+  |> should.equal([True, False])
 }
 
 fn hits_at(limiter: glimit.RateLimiter(a, b, String), times: List(Int)) {

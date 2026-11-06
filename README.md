@@ -112,7 +112,7 @@ See [`examples/redis/`](https://github.com/nootr/glimit/tree/main/examples/redis
 Every hit goes through the pluggable `Store` interface (`lock_and_get` / `set_and_unlock`), once per rate.
 
 * **Default (ETS)**: Direct table operations per hit. No actor overhead.
-* **Fail-open**: If the store is unavailable or a lock cannot be acquired, the request is allowed through rather than rejected.
+* **Fail-open**: If the store is unavailable or a lock cannot be acquired, the request is allowed through rather than rejected. With multiple rates, a rate that cannot be checked is skipped and the other rates still apply.
 * **Sweep**: Buckets that have refilled to full are automatically swept every 10 seconds. A partly used bucket is kept until it refills, so waiting does not reset a client's limit early.
 
 

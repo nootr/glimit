@@ -15,9 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- `per_second`, `per_minute` and `per_hour` (and their `_fn` variants) no longer replace a rate of a different period. Limiters that set rates for multiple periods now enforce all of them instead of only the last one. Setting a rate for the same period still replaces it.
+- **Behaviour change:** `per_second`, `per_minute` and `per_hour` (and their `_fn` variants) no longer replace a rate of a different period. Limiters that set rates for multiple periods now enforce all of them instead of only the last one, which can reject requests that 1.6.0 allowed and adds a bucket per rate. Setting a rate for the same period still replaces it.
 - With multiple rates, `burst_limit` sets the bucket size of the shortest period. Buckets of longer periods hold at least their own rate.
-- With multiple rates, each longer period stores its bucket under the key `glimit:<identifier>:<refill period in ms>`. The shortest period keeps the existing key.
+- Bucket keys now end in the refill period: `glimit:<identifier>:<refill period in ms>`, so a bucket always belongs to one period. **When upgrading with an external store**, existing buckets are no longer read and expire through their TTL, so every client starts once with a full bucket.
+- With multiple rates, a rate that cannot be checked is skipped and the other rates still apply: a rate function that crashes, an invalid value or a lock that cannot be acquired. A hit only fails open if no rate can be checked.
 - `glimit.get_count` and `ets_store.get_count` count buckets, of which an identifier can have one per rate. `glimit.remove` removes all buckets of an identifier.
 - `RateLimiter` and `RateLimiterBuilder` replace the `token_rate` and `refill_period_ms` fields with `rates`, and `RateLimiter.burst_limit` is now an `Option`. The builder functions are unchanged.
 
