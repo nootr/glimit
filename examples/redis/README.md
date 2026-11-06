@@ -50,7 +50,7 @@ You can see the stored bucket state:
 
 ```sh
 docker exec glimit-redis redis-cli KEYS 'glimit:*'
-docker exec glimit-redis redis-cli HGETALL 'glimit:#(127, 0, 0, 1):1000'
+docker exec glimit-redis redis-cli HGETALL 'glimit:"127.0.0.1":1000'
 ```
 
 ## Cleanup
