@@ -522,8 +522,8 @@ fn bucket_key(identifier: id, rate_index: Int, rate: Rate(id)) -> String {
   }
 }
 
-fn max_token_count(burst: Option(Int), token_rate: Int, rate_index: Int) -> Int {
-  case burst, rate_index {
+fn max_token_count(burst: Option(Int), token_rate: Int, index: Int) -> Int {
+  case burst, index {
     None, _ -> token_rate
     Some(burst), 0 -> burst
     Some(burst), _ -> int.max(burst, token_rate)
