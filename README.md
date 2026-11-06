@@ -104,6 +104,20 @@ By default, rate limit state is stored in ETS (Erlang Term Storage). For distrib
 
 All token bucket logic stays in glimit — adapters only implement `lock_and_get` / `set_and_unlock` / `unlock` operations. The `glimit/bucket` module provides `to_pairs`/`from_pairs` helpers for serialization.
 
+Requests run concurrently, so an adapter must be safe to call from multiple processes, for example by using a connection pool. `lock_and_get` should wait briefly for a held lock: if it fails, the limiter fails open and the request is not counted.
+
+Rate limiters that share a store, identifier and period share a bucket. Use `glimit.key_prefix` to keep them apart:
+
+```gleam
+let limiter =
+  glimit.new()
+  |> glimit.per_second(10)
+  |> glimit.store(my_redis_store)
+  |> glimit.key_prefix("uploads")
+  |> glimit.identifier(fn(request) { request.ip })
+  |> glimit.on_limit_exceeded(fn(_) { "Rate limit reached" })
+```
+
 See [`examples/redis/`](https://github.com/nootr/glimit/tree/main/examples/redis) for a complete Redis adapter using [valkyrie](https://hexdocs.pm/valkyrie/).
 
 

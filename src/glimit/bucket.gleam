@@ -26,15 +26,22 @@ const default_refill_period_ms = 1000
 /// bucket state.
 ///
 /// - `lock_and_get`: Acquire an exclusive lock for the key and retrieve its
-///   bucket state. Return `Ok(None)` for a new/missing key. If the lock cannot
-///   be acquired, return `Error(Nil)`.
+///   bucket state. Return `Ok(None)` for a new/missing key. If the lock is held,
+///   wait for it for a short, bounded time. If it still cannot be acquired,
+///   return `Error(Nil)`.
 /// - `set_and_unlock`: Persist bucket state with a TTL in seconds for automatic
-///   expiry, then release the lock.
+///   expiry, then release the lock. Always release the lock, also when returning
+///   `Error(Nil)`. An allowed hit then returns `Unavailable`.
 /// - `unlock`: Release the lock without writing. Used on error paths when there
 ///   is nothing to persist.
 ///
-/// When `lock_and_get` fails, the rate limiter **fails open** (allows the
-/// request).
+/// When `lock_and_get` fails or crashes, the rate limiter **fails open** (allows
+/// the request). A store that does not wait for the lock therefore lets most
+/// concurrent requests for an identifier through.
+///
+/// Requests run concurrently, so these functions must be safe to call from
+/// multiple processes. Use a connection pool rather than a single shared
+/// connection.
 ///
 /// A rate limiter with multiple rates has one bucket per rate. It locks their
 /// keys in a fixed order, shortest period first, and releases all of them once

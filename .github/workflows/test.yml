@@ -111,6 +111,13 @@ jobs:
       - name: Verify state in Redis
         run: |
           docker exec ${{ job.services.redis.id }} redis-cli KEYS 'glimit:*' | grep -q 'glimit:'
+      - name: Concurrent rate limit test
+        run: |
+          docker exec ${{ job.services.redis.id }} redis-cli FLUSHALL
+          ALLOWED=$(seq 1 20 | xargs -P 20 -I{} curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8000/ | grep -c 200 || true)
+          echo "Allowed $ALLOWED of 20 requests"
+          test "$ALLOWED" -ge 5
+          test "$ALLOWED" -le 8
       - name: Stop server
         if: always()
         run: kill "$(cat /tmp/server.pid)" 2>/dev/null || true

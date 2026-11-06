@@ -61,11 +61,13 @@ docker stop glimit-redis && docker rm glimit-redis
 
 ## How It Works
 
-The `redis_store` function in `src/app.gleam` creates a `glimit.Store` adapter that:
+`redis_store.new` in `src/redis_store.gleam` creates a `glimit.Store` adapter that:
 
 - **get**: Reads bucket state from a Redis hash using `HGETALL`, then parses it with `bucket.from_pairs`
 - **set**: Writes bucket state to a Redis hash using `HSET`, then sets a TTL with `EXPIRE`
-- **lock**: Acquires a distributed lock using `SET key:lock 1 NX EX 5` (auto-expires after 5 seconds)
+- **lock**: Acquires a distributed lock using `SET key:lock 1 NX EX 5` (auto-expires after 5 seconds), and waits for up to 500 ms if the lock is held
 - **unlock**: Releases the lock with `DEL key:lock`
 
-The rate limiter fails open — if Redis is unavailable or the lock can't be acquired, requests are allowed through.
+Requests run concurrently, so `src/app.gleam` uses a connection pool. A single connection cannot be shared between processes.
+
+The rate limiter fails open — if Redis is unavailable or the lock can't be acquired in time, requests are allowed through.

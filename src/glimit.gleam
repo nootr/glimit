@@ -119,7 +119,8 @@ pub type Store =
 pub type HitError {
   /// The rate limit has been exceeded.
   RateLimited
-  /// The rate limiter is unavailable.
+  /// The rate limiter is unavailable, for example because no rate could be
+  /// checked or a bucket could not be saved (fails open).
   Unavailable
   /// The store lock could not be acquired (fails open).
   StoreLockFailed
@@ -141,19 +142,15 @@ pub type RateLimiter(a, b, id) {
     ///
     rates: List(Rate(id)),
     burst_limit: Option(fn(id) -> Int),
+    key_prefix: Option(String),
     store: Store,
     ets_store: Option(EtsStore),
     now: fn() -> Int,
   )
 }
 
-type BucketConfig {
-  BucketConfig(
-    key: String,
-    max_token_count: Int,
-    token_rate: Int,
-    refill_period_ms: Int,
-  )
+type BucketConfig(id) {
+  BucketConfig(key: String, rate: Rate(id), index: Int)
 }
 
 /// A builder for configuring the rate limiter.
@@ -166,6 +163,7 @@ pub type RateLimiterBuilder(a, b, id) {
     on_limit_exceeded: Option(fn(a) -> b),
     max_idle_ms: Option(Int),
     store: Option(Store),
+    key_prefix: Option(String),
   )
 }
 
@@ -179,6 +177,7 @@ pub fn new() -> RateLimiterBuilder(a, b, id) {
     on_limit_exceeded: None,
     max_idle_ms: Some(60_000),
     store: None,
+    key_prefix: None,
   )
 }
 
@@ -219,6 +218,9 @@ pub fn per_second(
 /// identifier. If the function returns a different value later, existing buckets
 /// are not affected until they are swept (once they have refilled to full) and
 /// re-created on the next hit.
+/// With an external store it runs while the bucket is locked. Concurrent requests
+/// for this identifier wait for it, and fail open if they stop waiting, so keep it
+/// fast.
 ///
 /// # Example
 ///
@@ -274,6 +276,9 @@ pub fn per_minute(
 /// identifier. If the function returns a different value later, existing buckets
 /// are not affected until they are swept (once they have refilled to full) and
 /// re-created on the next hit.
+/// With an external store it runs while the bucket is locked. Concurrent requests
+/// for this identifier wait for it, and fail open if they stop waiting, so keep it
+/// fast.
 ///
 /// # Example
 ///
@@ -329,6 +334,9 @@ pub fn per_hour(
 /// identifier. If the function returns a different value later, existing buckets
 /// are not affected until they are swept (once they have refilled to full) and
 /// re-created on the next hit.
+/// With an external store it runs while the bucket is locked. Concurrent requests
+/// for this identifier wait for it, and fail open if they stop waiting, so keep it
+/// fast.
 ///
 /// # Example
 ///
@@ -404,6 +412,9 @@ pub fn burst_limit(
 /// identifier. If the function returns a different value later, existing buckets
 /// are not affected until they are swept (once they have refilled to full) and
 /// re-created on the next hit.
+/// With an external store it runs while the bucket is locked. Concurrent requests
+/// for this identifier wait for it, and fail open if they stop waiting, so keep it
+/// fast.
 ///
 /// # Example
 ///
@@ -470,6 +481,34 @@ pub fn store(
   RateLimiterBuilder(..limiter, store: Some(store))
 }
 
+/// Set a prefix for the store keys of this rate limiter.
+///
+/// Bucket keys are built from the identifier and the refill period. Rate limiters
+/// that share an external store, identifier and period therefore share a bucket,
+/// unless they have different key prefixes. This has no effect on the default ETS
+/// store, where each rate limiter has its own table.
+///
+/// # Example
+///
+/// ```gleam
+/// import glimit
+///
+/// let limiter =
+///   glimit.new()
+///   |> glimit.per_second(10)
+///   |> glimit.store(my_redis_store)
+///   |> glimit.key_prefix("uploads")
+///   |> glimit.identifier(fn(request) { request.ip })
+///   |> glimit.on_limit_exceeded(fn(_request) { "Rate limit reached" })
+/// ```
+///
+pub fn key_prefix(
+  limiter: RateLimiterBuilder(a, b, id),
+  key_prefix: String,
+) -> RateLimiterBuilder(a, b, id) {
+  RateLimiterBuilder(..limiter, key_prefix: Some(key_prefix))
+}
+
 /// Set the handler to be called when the rate limit is reached.
 ///
 /// # Example
@@ -509,12 +548,19 @@ pub fn identifier(
   RateLimiterBuilder(..limiter, identifier: Some(identifier))
 }
 
-fn string_key(identifier: id) -> String {
-  store_key_prefix <> string.inspect(identifier)
-}
-
-fn bucket_key(identifier: id, rate: Rate(id)) -> String {
-  string_key(identifier) <> ":" <> int.to_string(rate.refill_period_ms)
+fn bucket_key(
+  limiter: RateLimiter(a, b, id),
+  identifier: id,
+  rate: Rate(id),
+) -> String {
+  let prefix = case limiter.key_prefix {
+    Some(key_prefix) -> store_key_prefix <> key_prefix <> ":"
+    None -> store_key_prefix
+  }
+  prefix
+  <> string.inspect(identifier)
+  <> ":"
+  <> int.to_string(rate.refill_period_ms)
 }
 
 fn max_token_count(burst: Option(Int), token_rate: Int, index: Int) -> Int {
@@ -525,51 +571,89 @@ fn max_token_count(burst: Option(Int), token_rate: Int, index: Int) -> Int {
   }
 }
 
-/// A rate whose function crashes is left out, so the other rates still apply.
+fn lock_bucket(
+  store: Store,
+  config: BucketConfig(id),
+) -> Result(#(BucketConfig(id), Option(bucket.BucketState)), HitError) {
+  case utils.rescue(fn() { store.lock_and_get(config.key) }) {
+    Ok(Ok(state)) -> Ok(#(config, state))
+    _ -> Error(StoreLockFailed)
+  }
+}
+
+/// This and `new_bucket` are the only places that call the burst limit and rate
+/// functions, so they only run if a bucket does not exist yet.
 ///
-fn bucket_configs(
+fn resolve_burst(
   limiter: RateLimiter(a, b, id),
   identifier: id,
-) -> Result(List(BucketConfig), Nil) {
-  use burst <- result.map(case limiter.burst_limit {
+) -> Result(Option(Int), Nil) {
+  case limiter.burst_limit {
     Some(burst_limit) ->
       utils.rescue(fn() { burst_limit(identifier) })
       |> result.map(Some)
     None -> Ok(None)
-  })
-  limiter.rates
-  |> list.index_map(fn(rate, index) {
-    use token_rate <- result.map(
-      utils.rescue(fn() { rate.token_rate(identifier) }),
-    )
-    BucketConfig(
-      key: bucket_key(identifier, rate),
-      max_token_count: max_token_count(burst, token_rate, index),
-      token_rate: token_rate,
-      refill_period_ms: rate.refill_period_ms,
-    )
-  })
-  |> result.values
+  }
 }
 
-fn lock_bucket(
-  store: Store,
-  config: BucketConfig,
-) -> Result(#(String, bucket.BucketState), HitError) {
-  use maybe_bucket <- result.try(
-    store.lock_and_get(config.key) |> result.replace_error(StoreLockFailed),
+fn new_bucket(
+  config: BucketConfig(id),
+  identifier: id,
+  burst: Result(Option(Int), Nil),
+) -> Result(bucket.BucketState, Nil) {
+  use burst <- result.try(burst)
+  use token_rate <- result.try(
+    utils.rescue(fn() { config.rate.token_rate(identifier) }),
   )
-  let new_bucket =
-    bucket.new_with_period(
-      config.max_token_count,
-      config.token_rate,
-      config.refill_period_ms,
-    )
-  case maybe_bucket, new_bucket {
-    Some(state), _ | None, Ok(state) -> Ok(#(config.key, state))
-    None, Error(_) -> {
-      let _ = store.unlock(config.key)
-      Error(Unavailable)
+  bucket.new_with_period(
+    max_token_count(burst, token_rate, config.index),
+    token_rate,
+    config.rate.refill_period_ms,
+  )
+}
+
+/// Return the state of a locked bucket, creating it if needed. A bucket that
+/// cannot be created is unlocked.
+///
+fn locked_state(
+  store: Store,
+  locked: #(BucketConfig(id), Option(bucket.BucketState)),
+  identifier: id,
+  burst: Result(Option(Int), Nil),
+) -> Result(#(String, bucket.BucketState), HitError) {
+  let #(config, maybe_state) = locked
+  case maybe_state {
+    Some(state) -> Ok(#(config.key, state))
+    None ->
+      case new_bucket(config, identifier, burst) {
+        Ok(state) -> Ok(#(config.key, state))
+        Error(_) -> {
+          unlock_bucket(store, config.key)
+          Error(Unavailable)
+        }
+      }
+  }
+}
+
+fn unlock_bucket(store: Store, key: String) -> Nil {
+  let _ = utils.rescue(fn() { store.unlock(key) })
+  Nil
+}
+
+/// `set_and_unlock` releases the lock itself, even when it returns an error.
+/// Only a crash can leave the lock held.
+///
+fn save_bucket(
+  store: Store,
+  key: String,
+  state: bucket.BucketState,
+) -> Result(Nil, Nil) {
+  let ttl = bucket.compute_ttl(state)
+  case utils.rescue(fn() { store.set_and_unlock(key, state, ttl) }) {
+    Ok(saved) -> saved
+    Error(Nil) -> {
+      unlock_bucket(store, key)
+      Error(Nil)
     }
   }
 }
@@ -577,29 +661,47 @@ fn lock_bucket(
 /// A bucket that cannot be locked or created is skipped, so the other rates
 /// still apply. The hit only fails open if no bucket is left.
 ///
+/// An allowed hit that cannot be saved returns `Unavailable`, because its token
+/// was not recorded in every bucket.
+///
 fn store_hit(
-  store: Store,
-  now: fn() -> Int,
-  configs: List(BucketConfig),
+  limiter: RateLimiter(a, b, id),
+  identifier: id,
 ) -> Result(Nil, HitError) {
-  let #(locked, errors) =
-    configs
+  let store = limiter.store
+  let #(locked, lock_errors) =
+    limiter.rates
+    |> list.index_map(fn(rate, index) {
+      BucketConfig(
+        key: bucket_key(limiter, identifier, rate),
+        rate: rate,
+        index: index,
+      )
+    })
     |> list.map(lock_bucket(store, _))
     |> result.partition
-  case locked, errors {
+  let burst = case list.any(locked, fn(entry) { option.is_none(entry.1) }) {
+    True -> resolve_burst(limiter, identifier)
+    False -> Ok(None)
+  }
+  let #(buckets, create_errors) =
+    locked
+    |> list.map(locked_state(store, _, identifier, burst))
+    |> result.partition
+  case buckets, list.append(lock_errors, create_errors) {
     [], [error, ..] -> Error(error)
     [], [] -> Error(Unavailable)
     _, _ -> {
-      let #(keys, states) = list.unzip(locked)
-      let #(hit_result, new_states) = bucket.hit_all(states, now())
-      list.zip(keys, new_states)
-      |> list.each(fn(entry) {
-        let #(key, state) = entry
-        store.set_and_unlock(key, state, bucket.compute_ttl(state))
-      })
-      case hit_result {
-        Ok(Nil) -> Ok(Nil)
-        Error(Nil) -> Error(RateLimited)
+      let #(keys, states) = list.unzip(buckets)
+      let #(hit_result, new_states) = bucket.hit_all(states, limiter.now())
+      let save_result =
+        list.zip(keys, new_states)
+        |> list.map(fn(entry) { save_bucket(store, entry.0, entry.1) })
+        |> result.all
+      case hit_result, save_result {
+        Error(Nil), _ -> Error(RateLimited)
+        Ok(Nil), Ok(_) -> Ok(Nil)
+        Ok(Nil), Error(Nil) -> Error(Unavailable)
       }
     }
   }
@@ -650,6 +752,7 @@ pub fn build(
     identifier: identifier,
     rates: rates,
     burst_limit: config.burst_limit,
+    key_prefix: config.key_prefix,
     store: store,
     ets_store: es,
     now: utils.now,
@@ -662,10 +765,7 @@ pub fn hit(
   limiter: RateLimiter(a, b, id),
   identifier: id,
 ) -> Result(Nil, HitError) {
-  case bucket_configs(limiter, identifier) {
-    Error(_) -> Error(Unavailable)
-    Ok(configs) -> store_hit(limiter.store, limiter.now, configs)
-  }
+  store_hit(limiter, identifier)
 }
 
 /// Apply the rate limiter to a request handler or function.
@@ -723,7 +823,7 @@ pub fn remove(limiter: RateLimiter(a, b, id), identifier: id) -> Nil {
     Some(es) ->
       limiter.rates
       |> list.each(fn(rate) {
-        ets_store.remove(es, bucket_key(identifier, rate))
+        ets_store.remove(es, bucket_key(limiter, identifier, rate))
       })
     None -> Nil
   }
