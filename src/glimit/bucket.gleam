@@ -36,6 +36,11 @@ const default_refill_period_ms = 1000
 /// When `lock_and_get` fails, the rate limiter **fails open** (allows the
 /// request).
 ///
+/// A rate limiter with multiple rates has one bucket per rate. It locks their
+/// keys in a fixed order, shortest period first, and releases all of them once
+/// the hit is done. A bucket whose lock cannot be acquired is skipped, and the
+/// other rates still apply.
+///
 pub type Store {
   Store(
     lock_and_get: fn(String) -> Result(Option(BucketState), Nil),
@@ -132,13 +137,36 @@ pub fn refill(state: BucketState, now: Int) -> BucketState {
 ///
 pub fn hit(state: BucketState, now: Int) -> #(Result(Nil, Nil), BucketState) {
   let state = refill(state, now)
-  case state.token_count >=. 1.0 {
-    True -> #(
-      Ok(Nil),
-      BucketState(..state, token_count: state.token_count -. 1.0),
-    )
+  case has_token(state) {
+    True -> #(Ok(Nil), consume(state))
     False -> #(Error(Nil), state)
   }
+}
+
+/// Hit multiple buckets at once: refill all of them, then consume one token from
+/// each, but only if every bucket has a token available.
+///
+/// Returns `#(Ok(Nil), new_states)` on success,
+/// `#(Error(Nil), new_states)` when rate-limited, in which case no tokens are
+/// consumed.
+///
+pub fn hit_all(
+  states: List(BucketState),
+  now: Int,
+) -> #(Result(Nil, Nil), List(BucketState)) {
+  let states = list.map(states, refill(_, now))
+  case list.all(states, has_token) {
+    True -> #(Ok(Nil), list.map(states, consume))
+    False -> #(Error(Nil), states)
+  }
+}
+
+fn has_token(state: BucketState) -> Bool {
+  state.token_count >=. 1.0
+}
+
+fn consume(state: BucketState) -> BucketState {
+  BucketState(..state, token_count: state.token_count -. 1.0)
 }
 
 /// Convert a BucketState to a list of string key-value pairs.
