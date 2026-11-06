@@ -30,13 +30,13 @@ const default_refill_period_ms = 1000
 ///   wait for it for a short, bounded time. If it still cannot be acquired,
 ///   return `Error(Nil)`.
 /// - `set_and_unlock`: Persist bucket state with a TTL in seconds for automatic
-///   expiry, then release the lock. If this returns `Error(Nil)`, `unlock` is
-///   called and an allowed hit returns `Unavailable`.
+///   expiry, then release the lock. Always release the lock, also when returning
+///   `Error(Nil)`. An allowed hit then returns `Unavailable`.
 /// - `unlock`: Release the lock without writing. Used on error paths when there
 ///   is nothing to persist.
 ///
-/// When `lock_and_get` fails, the rate limiter **fails open** (allows the
-/// request). A store that does not wait for the lock therefore lets most
+/// When `lock_and_get` fails or crashes, the rate limiter **fails open** (allows
+/// the request). A store that does not wait for the lock therefore lets most
 /// concurrent requests for an identifier through.
 ///
 /// Requests run concurrently, so these functions must be safe to call from

@@ -149,8 +149,8 @@ pub type RateLimiter(a, b, id) {
   )
 }
 
-type BucketConfig {
-  BucketConfig(key: String, new_bucket: fn() -> Result(bucket.BucketState, Nil))
+type BucketConfig(id) {
+  BucketConfig(key: String, rate: Rate(id), index: Int)
 }
 
 /// A builder for configuring the rate limiter.
@@ -218,7 +218,9 @@ pub fn per_second(
 /// identifier. If the function returns a different value later, existing buckets
 /// are not affected until they are swept (once they have refilled to full) and
 /// re-created on the next hit.
-/// With an external store it runs while the bucket is locked, so keep it fast.
+/// With an external store it runs while the bucket is locked. Concurrent requests
+/// for this identifier wait for it, and fail open if they stop waiting, so keep it
+/// fast.
 ///
 /// # Example
 ///
@@ -274,7 +276,9 @@ pub fn per_minute(
 /// identifier. If the function returns a different value later, existing buckets
 /// are not affected until they are swept (once they have refilled to full) and
 /// re-created on the next hit.
-/// With an external store it runs while the bucket is locked, so keep it fast.
+/// With an external store it runs while the bucket is locked. Concurrent requests
+/// for this identifier wait for it, and fail open if they stop waiting, so keep it
+/// fast.
 ///
 /// # Example
 ///
@@ -330,7 +334,9 @@ pub fn per_hour(
 /// identifier. If the function returns a different value later, existing buckets
 /// are not affected until they are swept (once they have refilled to full) and
 /// re-created on the next hit.
-/// With an external store it runs while the bucket is locked, so keep it fast.
+/// With an external store it runs while the bucket is locked. Concurrent requests
+/// for this identifier wait for it, and fail open if they stop waiting, so keep it
+/// fast.
 ///
 /// # Example
 ///
@@ -406,7 +412,9 @@ pub fn burst_limit(
 /// identifier. If the function returns a different value later, existing buckets
 /// are not affected until they are swept (once they have refilled to full) and
 /// re-created on the next hit.
-/// With an external store it runs while the bucket is locked, so keep it fast.
+/// With an external store it runs while the bucket is locked. Concurrent requests
+/// for this identifier wait for it, and fail open if they stop waiting, so keep it
+/// fast.
 ///
 /// # Example
 ///
@@ -563,60 +571,88 @@ fn max_token_count(burst: Option(Int), token_rate: Int, index: Int) -> Int {
   }
 }
 
-/// Create the bucket of a rate. This is the only place that calls the rate and
-/// burst limit functions, so they only run for a bucket that does not exist yet.
+fn lock_bucket(
+  store: Store,
+  config: BucketConfig(id),
+) -> Result(#(BucketConfig(id), Option(bucket.BucketState)), HitError) {
+  case utils.rescue(fn() { store.lock_and_get(config.key) }) {
+    Ok(Ok(state)) -> Ok(#(config, state))
+    _ -> Error(StoreLockFailed)
+  }
+}
+
+/// This and `new_bucket` are the only places that call the burst limit and rate
+/// functions, so they only run if a bucket does not exist yet.
 ///
-fn new_bucket(
+fn resolve_burst(
   limiter: RateLimiter(a, b, id),
   identifier: id,
-  rate: Rate(id),
-  index: Int,
-) -> Result(bucket.BucketState, Nil) {
-  use burst <- result.try(case limiter.burst_limit {
+) -> Result(Option(Int), Nil) {
+  case limiter.burst_limit {
     Some(burst_limit) ->
       utils.rescue(fn() { burst_limit(identifier) })
       |> result.map(Some)
     None -> Ok(None)
-  })
+  }
+}
+
+fn new_bucket(
+  config: BucketConfig(id),
+  identifier: id,
+  burst: Result(Option(Int), Nil),
+) -> Result(bucket.BucketState, Nil) {
+  use burst <- result.try(burst)
   use token_rate <- result.try(
-    utils.rescue(fn() { rate.token_rate(identifier) }),
+    utils.rescue(fn() { config.rate.token_rate(identifier) }),
   )
   bucket.new_with_period(
-    max_token_count(burst, token_rate, index),
+    max_token_count(burst, token_rate, config.index),
     token_rate,
-    rate.refill_period_ms,
+    config.rate.refill_period_ms,
   )
 }
 
-fn lock_bucket(
+/// Return the state of a locked bucket, creating it if needed. A bucket that
+/// cannot be created is unlocked.
+///
+fn locked_state(
   store: Store,
-  config: BucketConfig,
+  locked: #(BucketConfig(id), Option(bucket.BucketState)),
+  identifier: id,
+  burst: Result(Option(Int), Nil),
 ) -> Result(#(String, bucket.BucketState), HitError) {
-  use maybe_bucket <- result.try(
-    store.lock_and_get(config.key) |> result.replace_error(StoreLockFailed),
-  )
-  case maybe_bucket {
+  let #(config, maybe_state) = locked
+  case maybe_state {
     Some(state) -> Ok(#(config.key, state))
     None ->
-      case config.new_bucket() {
+      case new_bucket(config, identifier, burst) {
         Ok(state) -> Ok(#(config.key, state))
         Error(_) -> {
-          let _ = store.unlock(config.key)
+          unlock_bucket(store, config.key)
           Error(Unavailable)
         }
       }
   }
 }
 
+fn unlock_bucket(store: Store, key: String) -> Nil {
+  let _ = utils.rescue(fn() { store.unlock(key) })
+  Nil
+}
+
+/// `set_and_unlock` releases the lock itself, even when it returns an error.
+/// Only a crash can leave the lock held.
+///
 fn save_bucket(
   store: Store,
   key: String,
   state: bucket.BucketState,
 ) -> Result(Nil, Nil) {
-  case store.set_and_unlock(key, state, bucket.compute_ttl(state)) {
-    Ok(Nil) -> Ok(Nil)
+  let ttl = bucket.compute_ttl(state)
+  case utils.rescue(fn() { store.set_and_unlock(key, state, ttl) }) {
+    Ok(saved) -> saved
     Error(Nil) -> {
-      let _ = store.unlock(key)
+      unlock_bucket(store, key)
       Error(Nil)
     }
   }
@@ -629,20 +665,35 @@ fn save_bucket(
 /// was not recorded in every bucket.
 ///
 fn store_hit(
-  store: Store,
-  now: fn() -> Int,
-  configs: List(BucketConfig),
+  limiter: RateLimiter(a, b, id),
+  identifier: id,
 ) -> Result(Nil, HitError) {
-  let #(locked, errors) =
-    configs
+  let store = limiter.store
+  let #(locked, lock_errors) =
+    limiter.rates
+    |> list.index_map(fn(rate, index) {
+      BucketConfig(
+        key: bucket_key(limiter, identifier, rate),
+        rate: rate,
+        index: index,
+      )
+    })
     |> list.map(lock_bucket(store, _))
     |> result.partition
-  case locked, errors {
+  let burst = case list.any(locked, fn(entry) { option.is_none(entry.1) }) {
+    True -> resolve_burst(limiter, identifier)
+    False -> Ok(None)
+  }
+  let #(buckets, create_errors) =
+    locked
+    |> list.map(locked_state(store, _, identifier, burst))
+    |> result.partition
+  case buckets, list.append(lock_errors, create_errors) {
     [], [error, ..] -> Error(error)
     [], [] -> Error(Unavailable)
     _, _ -> {
-      let #(keys, states) = list.unzip(locked)
-      let #(hit_result, new_states) = bucket.hit_all(states, now())
+      let #(keys, states) = list.unzip(buckets)
+      let #(hit_result, new_states) = bucket.hit_all(states, limiter.now())
       let save_result =
         list.zip(keys, new_states)
         |> list.map(fn(entry) { save_bucket(store, entry.0, entry.1) })
@@ -714,13 +765,7 @@ pub fn hit(
   limiter: RateLimiter(a, b, id),
   identifier: id,
 ) -> Result(Nil, HitError) {
-  limiter.rates
-  |> list.index_map(fn(rate, index) {
-    BucketConfig(key: bucket_key(limiter, identifier, rate), new_bucket: fn() {
-      new_bucket(limiter, identifier, rate, index)
-    })
-  })
-  |> store_hit(limiter.store, limiter.now, _)
+  store_hit(limiter, identifier)
 }
 
 /// Apply the rate limiter to a request handler or function.

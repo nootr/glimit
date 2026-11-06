@@ -1382,7 +1382,7 @@ pub fn panicking_burst_function_keeps_existing_buckets_test() {
   glimit.hit(limiter, "id") |> should.equal(Error(glimit.RateLimited))
 }
 
-pub fn failed_save_returns_unavailable_and_unlocks_test() {
+pub fn failed_save_returns_unavailable_without_second_unlock_test() {
   let unlocked = process.new_subject()
   let store =
     bucket.Store(
@@ -1403,13 +1403,82 @@ pub fn failed_save_returns_unavailable_and_unlocks_test() {
     |> glimit.build
 
   glimit.hit(limiter, "id") |> should.equal(Error(glimit.Unavailable))
-  process.receive(unlocked, 100)
-  |> should.equal(Ok("glimit:\"id\":1000"))
+  // `set_and_unlock` releases the lock, which another request may hold by now
+  process.receive(unlocked, 0) |> should.be_error
 
   let func =
     fn(_) { "OK" }
     |> glimit.apply_built(limiter)
   func("request") |> should.equal("OK")
+}
+
+pub fn panicking_lock_fails_open_test() {
+  let store =
+    bucket.Store(
+      lock_and_get: fn(_) { panic as "pool timeout" },
+      set_and_unlock: fn(_, _, _) { Ok(Nil) },
+      unlock: fn(_) { Ok(Nil) },
+    )
+
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.store(store)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.StoreLockFailed))
+  let func =
+    fn(_) { "OK" }
+    |> glimit.apply_built(limiter)
+  func("request") |> should.equal("OK")
+}
+
+pub fn panicking_save_unlocks_and_fails_open_test() {
+  let unlocked = process.new_subject()
+  let store =
+    bucket.Store(
+      lock_and_get: fn(_) { Ok(option.None) },
+      set_and_unlock: fn(_, _, _) { panic as "pool timeout" },
+      unlock: fn(key) {
+        process.send(unlocked, key)
+        panic as "pool timeout"
+      },
+    )
+
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.store(store)
+    |> glimit.identifier(fn(_) { "id" })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(limiter, "id") |> should.equal(Error(glimit.Unavailable))
+  process.receive(unlocked, 100)
+  |> should.equal(Ok("glimit:\"id\":1000"))
+}
+
+pub fn burst_function_runs_once_per_hit_test() {
+  let burst_calls = process.new_subject()
+
+  let assert Ok(limiter) =
+    glimit.new()
+    |> glimit.per_second(1)
+    |> glimit.per_minute(2)
+    |> glimit.per_hour(3)
+    |> glimit.burst_limit_fn(fn(id) {
+      process.send(burst_calls, id)
+      2
+    })
+    |> glimit.identifier(fn(x) { x })
+    |> glimit.on_limit_exceeded(fn(_) { "Stop!" })
+    |> glimit.build
+
+  glimit.hit(limiter, "a") |> should.be_ok
+  process.receive(burst_calls, 100) |> should.equal(Ok("a"))
+  process.receive(burst_calls, 0) |> should.be_error
 }
 
 pub fn partly_failed_save_returns_unavailable_test() {

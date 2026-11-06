@@ -16,9 +16,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- Rate and burst limit functions now run only when a bucket is created, as documented. They used to run on every hit. With an external store they run while the bucket is locked.
-- A failed `set_and_unlock` no longer goes unnoticed: the lock is released with `unlock`, and an allowed hit returns `Unavailable`.
-- The Redis example uses a connection pool and waits for held locks. Its single shared connection and immediate lock failures let most concurrent requests bypass the limit.
+- Rate and burst limit functions now run only when a bucket is created, as documented. They used to run on every hit. The burst limit function runs at most once per hit. With an external store they run while the bucket is locked.
+- A failed `set_and_unlock` no longer goes unnoticed: an allowed hit returns `Unavailable`. The `Store` docs now require `set_and_unlock` to release the lock, also when it fails.
+- A store that crashes no longer crashes the request. A crash in `lock_and_get` fails open, and a crash in `set_and_unlock` is handled like a failed save.
+- The Redis example uses a connection pool and waits for held locks. Its single shared connection and immediate lock failures let most concurrent requests bypass the limit. It also reports a failed `EXPIRE`.
 
 ### Changed
 
