@@ -2,6 +2,7 @@ import gleam/bytes_tree
 import gleam/erlang/process
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
+import gleam/option.{None}
 import gleam/result
 import glimit
 import mist.{type Connection, type ResponseData}
@@ -16,9 +17,15 @@ fn get_ip(req: Request(Connection)) -> String {
 }
 
 pub fn main() {
+  // Requests run concurrently, so they need a pool: a single connection
+  // cannot be shared between processes
   let assert Ok(conn) =
-    valkyrie.default_config()
-    |> valkyrie.create_connection(redis_store.default_timeout)
+    valkyrie.start_pool(
+      config: valkyrie.default_config(),
+      size: 16,
+      name: None,
+      timeout: redis_store.default_timeout,
+    )
 
   let limiter =
     glimit.new()

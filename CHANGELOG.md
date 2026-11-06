@@ -12,6 +12,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Rates of different periods can be combined, such as `per_second(10) |> per_hour(1000)`. A request must pass all of them and only spends tokens if it does.
 - `bucket.hit_all(states, now)` consumes a token from every bucket, or from none of them.
 - `glimit.Rate` holds a token rate and its refill period.
+- `glimit.key_prefix` keeps rate limiters apart that share a store, identifier and period.
+
+### Fixed
+
+- Rate and burst limit functions now run only when a bucket is created, as documented. They used to run on every hit. With an external store they run while the bucket is locked.
+- A failed `set_and_unlock` no longer goes unnoticed: the lock is released with `unlock`, and an allowed hit returns `Unavailable`.
+- The Redis example uses a connection pool and waits for held locks. Its single shared connection and immediate lock failures let most concurrent requests bypass the limit.
 
 ### Changed
 
@@ -20,7 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Bucket keys now end in the refill period: `glimit:<identifier>:<refill period in ms>`, so a bucket always belongs to one period. **When upgrading with an external store**, existing buckets are no longer read and expire through their TTL, so every client starts once with a full bucket.
 - With multiple rates, a rate that cannot be checked is skipped and the other rates still apply: a rate function that crashes, an invalid value or a lock that cannot be acquired. A hit only fails open if no rate can be checked.
 - `glimit.get_count` and `ets_store.get_count` count buckets, of which an identifier can have one per rate. `glimit.remove` removes all buckets of an identifier.
-- `RateLimiter` and `RateLimiterBuilder` replace the `token_rate` and `refill_period_ms` fields with `rates`, and `RateLimiter.burst_limit` is now an `Option`. The builder functions are unchanged.
+- `RateLimiter` and `RateLimiterBuilder` replace the `token_rate` and `refill_period_ms` fields with `rates`, `RateLimiter.burst_limit` is now an `Option`, and both have a new `key_prefix` field. The builder functions are unchanged.
+- The `Store` docs now require adapters to be safe to call from multiple processes, and `lock_and_get` to wait briefly for a held lock.
 
 
 ## 1.6.0 - 2026-11-04
