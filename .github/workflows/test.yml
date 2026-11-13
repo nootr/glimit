@@ -93,6 +93,8 @@ jobs:
           rebar3-version: "3"
       - run: gleam build
         working-directory: examples/redis
+      - run: gleam test
+        working-directory: examples/redis
       - name: Start server
         run: |
           gleam run &

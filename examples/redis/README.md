@@ -61,13 +61,26 @@ docker stop glimit-redis && docker rm glimit-redis
 
 ## How It Works
 
-`redis_store.new` in `src/redis_store.gleam` creates a `glimit.Store` adapter that:
+`redis_store.new` in `src/redis_store.gleam` creates a `glimit.Store` adapter. Each bucket is a Redis hash guarded by a lock key (`<key>:lock`) holding a random token. Every operation is a single Lua script, so it is atomic and takes one round trip:
 
-- **get**: Reads bucket state from a Redis hash using `HGETALL`, then parses it with `bucket.from_pairs`
-- **set**: Writes bucket state to a Redis hash using `HSET`, then sets a TTL with `EXPIRE`
-- **lock**: Acquires a distributed lock using `SET key:lock 1 NX EX 5` (auto-expires after 5 seconds), and waits for up to 500 ms if the lock is held
-- **unlock**: Releases the lock with `DEL key:lock`
+- **lock_and_get**: Sets the lock with `SET <key>:lock <token> NX PX 5000` and reads the bucket with `HGETALL`. If the lock is held, it waits for up to 500 ms.
+- **set_and_unlock**: Writes the bucket with `HSET`, sets a TTL with `EXPIRE` and deletes the lock, but only if the lock still holds our token. If the lock expired and was taken over by another request, nothing is written and the hit returns `Unavailable`.
+- **unlock**: Deletes the lock, but only if it still holds our token.
+
+Every reply has to include the token, so a reply meant for another command is never taken as our own. When a command times out, the store assumes it may have run and releases its lock, which is safe because only our own token is deleted.
+
+The lock expires after 5 seconds, in case its holder crashes. A hit must finish within that time, including the rate and burst limit functions.
 
 Requests run concurrently, so `src/app.gleam` uses a connection pool. A single connection cannot be shared between processes.
 
 The rate limiter fails open — if Redis is unavailable or the lock can't be acquired in time, requests are allowed through.
+
+The bucket and its lock key are used in the same script, so Redis Cluster is not supported.
+
+## Running the Tests
+
+The tests need Redis on `localhost:6379`:
+
+```sh
+gleam test
+```
