@@ -42,41 +42,11 @@ const min_retry_delay_ms = 2
 
 const max_retry_delay_ms = 50
 
-/// KEYS: bucket, lock. ARGV: token, lock TTL in ms.
-/// Returns `{token, fields}` if the lock was acquired, or `0` if it is held.
-///
-const lock_and_get_script = "
-if redis.call('SET', KEYS[2], ARGV[1], 'NX', 'PX', ARGV[2]) then
-  return {ARGV[1], redis.call('HGETALL', KEYS[1])}
-end
-return 0
-"
-
-/// KEYS: bucket, lock. ARGV: token, TTL in seconds, field, value, ...
-/// Returns the token if the state was saved, or `0` if the lock was lost.
-///
-const set_and_unlock_script = "
-if redis.call('GET', KEYS[2]) ~= ARGV[1] then
-  return 0
-end
-redis.call('HSET', KEYS[1], unpack(ARGV, 3))
-redis.call('EXPIRE', KEYS[1], ARGV[2])
-redis.call('DEL', KEYS[2])
-return ARGV[1]
-"
-
-/// KEYS: lock. ARGV: token. Returns the token.
-///
-const unlock_script = "
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-  redis.call('DEL', KEYS[1])
-end
-return ARGV[1]
-"
-
 type Failure {
   /// Another request holds the lock.
   LockHeld
+  /// Our lock expired, and may now belong to another request.
+  LockLost
   /// The request failed. The command may or may not have run.
   CommandFailed(valkyrie.Error)
   /// Redis replied with something else than expected, such as a reply meant
@@ -101,8 +71,8 @@ fn new_token() -> String {
 fn eval(
   conn: valkyrie.Connection,
   script: String,
-  keys: List(String),
-  args: List(String),
+  keys keys: List(String),
+  args args: List(String),
 ) -> Result(resp.Value, Failure) {
   let command =
     list.flatten([
@@ -114,6 +84,117 @@ fn eval(
     Ok([reply]) -> Ok(reply)
     Ok(_) -> Error(UnexpectedReply)
     Error(error) -> Error(CommandFailed(error))
+  }
+}
+
+fn parse_fields(fields: List(resp.Value)) -> Option(bucket.BucketState) {
+  let pairs =
+    fields
+    |> list.sized_chunk(2)
+    |> list.filter_map(fn(pair) {
+      case pair {
+        [resp.BulkString(k), resp.BulkString(v)] -> Ok(#(k, v))
+        _ -> Error(Nil)
+      }
+    })
+  bucket.from_pairs(pairs) |> option.from_result
+}
+
+/// Set the lock to `token` if it is free, and read the bucket.
+///
+fn lock_and_get_script(
+  conn: valkyrie.Connection,
+  bucket_key bucket_key: String,
+  lock_key lock_key: String,
+  token token: String,
+  lock_ttl_ms lock_ttl_ms: Int,
+) -> Result(Option(bucket.BucketState), Failure) {
+  let script =
+    "
+    local bucket_key, lock_key = KEYS[1], KEYS[2]
+    local token, lock_ttl_ms = ARGV[1], ARGV[2]
+
+    if not redis.call('SET', lock_key, token, 'NX', 'PX', lock_ttl_ms) then
+      return 0
+    end
+    return {token, redis.call('HGETALL', bucket_key)}
+    "
+  let reply =
+    eval(conn, script, keys: [bucket_key, lock_key], args: [
+      token,
+      int.to_string(lock_ttl_ms),
+    ])
+  case reply {
+    Ok(resp.Array([resp.BulkString(reply_token), resp.Array(fields)]))
+      if reply_token == token
+    -> Ok(parse_fields(fields))
+    Ok(resp.Integer(0)) -> Error(LockHeld)
+    Ok(_) -> Error(UnexpectedReply)
+    Error(failure) -> Error(failure)
+  }
+}
+
+/// Write the bucket, set its TTL and release the lock, if the lock still holds
+/// `token`.
+///
+fn set_and_unlock_script(
+  conn: valkyrie.Connection,
+  bucket_key bucket_key: String,
+  lock_key lock_key: String,
+  token token: String,
+  ttl_seconds ttl_seconds: Int,
+  fields fields: List(#(String, String)),
+) -> Result(Nil, Failure) {
+  let script =
+    "
+    local bucket_key, lock_key = KEYS[1], KEYS[2]
+    local token, ttl_seconds = ARGV[1], ARGV[2]
+    local fields = {unpack(ARGV, 3)}
+
+    if redis.call('GET', lock_key) ~= token then
+      return 0
+    end
+    redis.call('HSET', bucket_key, unpack(fields))
+    redis.call('EXPIRE', bucket_key, ttl_seconds)
+    redis.call('DEL', lock_key)
+    return token
+    "
+  let field_args = list.flat_map(fields, fn(pair) { [pair.0, pair.1] })
+  let reply =
+    eval(conn, script, keys: [bucket_key, lock_key], args: [
+      token,
+      int.to_string(ttl_seconds),
+      ..field_args
+    ])
+  case reply {
+    Ok(resp.BulkString(reply_token)) if reply_token == token -> Ok(Nil)
+    Ok(resp.Integer(0)) -> Error(LockLost)
+    Ok(_) -> Error(UnexpectedReply)
+    Error(failure) -> Error(failure)
+  }
+}
+
+/// Release the lock, if it still holds `token`.
+///
+fn unlock_script(
+  conn: valkyrie.Connection,
+  lock_key lock_key: String,
+  token token: String,
+) -> Result(Nil, Failure) {
+  let script =
+    "
+    local lock_key = KEYS[1]
+    local token = ARGV[1]
+
+    if redis.call('GET', lock_key) == token then
+      redis.call('DEL', lock_key)
+    end
+    return token
+    "
+  case eval(conn, script, keys: [lock_key], args: [token]) {
+    Ok(resp.BulkString(reply_token)) if reply_token == token -> Ok(Nil)
+    Ok(_) -> Error(UnexpectedReply)
+    Error(failure) -> Error(failure)
   }
 }
 
@@ -165,22 +246,11 @@ fn when_connected(command: fn() -> Result(a, Failure)) -> Result(a, Failure) {
   with_retries(command, pool_is_busy, max_wait_ms, min_retry_delay_ms)
 }
 
-fn parse_fields(fields: List(resp.Value)) -> Option(bucket.BucketState) {
-  let pairs =
-    fields
-    |> list.sized_chunk(2)
-    |> list.filter_map(fn(pair) {
-      case pair {
-        [resp.BulkString(k), resp.BulkString(v)] -> Ok(#(k, v))
-        _ -> Error(Nil)
-      }
-    })
-  bucket.from_pairs(pairs) |> option.from_result
-}
-
 fn release(conn: valkyrie.Connection, key: String, token: String) -> Nil {
   let _ =
-    when_connected(fn() { eval(conn, unlock_script, [lock_key(key)], [token]) })
+    when_connected(fn() {
+      unlock_script(conn, lock_key: lock_key(key), token: token)
+    })
   Nil
 }
 
@@ -193,19 +263,13 @@ fn lock_and_get(
 ) -> Result(Option(bucket.BucketState), Nil) {
   let token = new_token()
   let acquire = fn() {
-    case
-      eval(conn, lock_and_get_script, [key, lock_key(key)], [
-        token,
-        int.to_string(lock_ttl_ms),
-      ])
-    {
-      Ok(resp.Array([resp.BulkString(reply_token), resp.Array(fields)]))
-        if reply_token == token
-      -> Ok(parse_fields(fields))
-      Ok(resp.Integer(0)) -> Error(LockHeld)
-      Ok(_) -> Error(UnexpectedReply)
-      Error(failure) -> Error(failure)
-    }
+    lock_and_get_script(
+      conn,
+      bucket_key: key,
+      lock_key: lock_key(key),
+      token: token,
+      lock_ttl_ms: lock_ttl_ms,
+    )
   }
   case
     with_retries(
@@ -238,21 +302,21 @@ fn set_and_unlock(
   ttl: Int,
 ) -> Result(Nil, Nil) {
   use token <- result.try(take_token(key))
-  let fields =
-    bucket.to_pairs(state)
-    |> list.flat_map(fn(pair) { [pair.0, pair.1] })
   let save = fn() {
-    eval(conn, set_and_unlock_script, [key, lock_key(key)], [
-      token,
-      int.to_string(ttl),
-      ..fields
-    ])
+    set_and_unlock_script(
+      conn,
+      bucket_key: key,
+      lock_key: lock_key(key),
+      token: token,
+      ttl_seconds: ttl,
+      fields: bucket.to_pairs(state),
+    )
   }
   case when_connected(save) {
-    Ok(resp.BulkString(reply_token)) if reply_token == token -> Ok(Nil)
-    // The lock expired and may now belong to another request
-    Ok(resp.Integer(0)) -> Error(Nil)
-    _ -> {
+    Ok(Nil) -> Ok(Nil)
+    Error(LockLost) -> Error(Nil)
+    // The script may or may not have run, so the lock may still be ours
+    Error(_) -> {
       release(conn, key, token)
       Error(Nil)
     }
